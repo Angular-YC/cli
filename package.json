@@ -1,0 +1,40 @@
+{
+  "name": "angular-cli-yc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CLI + Runtime for deploying Angular to Yandex Cloud",
+  "license": "MIT",
+  "author": "Angular-YC Contributors",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "ci": "pnpm lint && pnpm test && pnpm build",
+    "dev": "pnpm -r --parallel dev",
+    "clean": "pnpm -r exec rm -rf dist node_modules && rm -rf node_modules",
+    "cli": "node packages/angular-yc/dist/index.js",
+    "cli:dev": "tsx packages/angular-yc/src/index.ts",
+    "setup": "pnpm install && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch@>=5 <10": "^10.0.1"
+    }
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

@@ -1,0 +1,87 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://npm.pkg.github.com'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Configure npm for GitHub Packages
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
+          echo "@angular-yc:registry=https://npm.pkg.github.com" >> ~/.npmrc
+
+      - name: Publish @angular-yc/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cd packages/angular-yc
+          npm version $VERSION --no-git-tag-version --allow-same-version
+          npm publish --access public || echo "Version $VERSION already published, skipping"
+          cd ../..
+
+      - name: Publish @angular-yc/runtime
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cd packages/runtime-yc
+          npm version $VERSION --no-git-tag-version --allow-same-version
+          npm publish --access public || echo "Version $VERSION already published, skipping"
+          cd ../..
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="v${{ steps.version.outputs.version }}"
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "Release $VERSION already exists, skipping"
+          else
+            {
+              echo "## Release $VERSION"
+              echo
+              echo "### Packages Published"
+              echo "- \`@angular-yc/cli@${{ steps.version.outputs.version }}\`"
+              echo "- \`@angular-yc/runtime@${{ steps.version.outputs.version }}\`"
+            } > release-notes.md
+            gh release create "$VERSION" \
+              --title "Release $VERSION" \
+              --notes-file release-notes.md
+          fi
