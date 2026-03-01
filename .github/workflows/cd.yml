@@ -44,28 +44,39 @@ jobs:
 
       - name: Configure npm for GitHub Packages
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
-          echo "@angular-yc:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> "$NPM_CONFIG_USERCONFIG"
+          echo "@angular-yc:registry=https://npm.pkg.github.com" >> "$NPM_CONFIG_USERCONFIG"
+          echo "always-auth=true" >> "$NPM_CONFIG_USERCONFIG"
 
       - name: Publish @angular-yc/cli
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          cd packages/angular-yc
-          npm version $VERSION --no-git-tag-version --allow-same-version
-          npm publish --access public || echo "Version $VERSION already published, skipping"
-          cd ../..
+          PACKAGE_NAME="@angular-yc/cli"
+          if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://npm.pkg.github.com > /dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$VERSION already exists in GitHub Packages, skipping publish"
+          else
+            cd packages/angular-yc
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            npm publish --access public
+            cd ../..
+          fi
 
       - name: Publish @angular-yc/runtime
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          cd packages/runtime-yc
-          npm version $VERSION --no-git-tag-version --allow-same-version
-          npm publish --access public || echo "Version $VERSION already published, skipping"
-          cd ../..
+          PACKAGE_NAME="@angular-yc/runtime"
+          if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://npm.pkg.github.com > /dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$VERSION already exists in GitHub Packages, skipping publish"
+          else
+            cd packages/runtime-yc
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            npm publish --access public
+            cd ../..
+          fi
 
       - name: Create GitHub Release
         env:
