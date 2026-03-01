@@ -260,12 +260,19 @@ function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: bo
 
     const originalSetHeader = res.setHeader.bind(res);
     res.setHeader = function (name: string, value: number | string | readonly string[]) {
-      responseHeaders[name.toLowerCase()] = Array.isArray(value)
-        ? [...value]
-        : typeof value === 'number'
-          ? String(value)
-          : value;
-      return originalSetHeader(name, value);
+      let normalizedValue: string | string[];
+      if (Array.isArray(value)) {
+        normalizedValue = value.map((item) => String(item));
+      } else if (typeof value === 'number') {
+        normalizedValue = String(value);
+      } else if (typeof value === 'string') {
+        normalizedValue = value;
+      } else {
+        normalizedValue = Array.from(value);
+      }
+
+      responseHeaders[name.toLowerCase()] = normalizedValue;
+      return originalSetHeader(name, normalizedValue);
     };
 
     const originalWrite = res.write.bind(res);

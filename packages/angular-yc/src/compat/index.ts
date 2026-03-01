@@ -271,6 +271,6 @@ export class CompatibilityChecker {
 
   private normalizeVersion(version: string): string | undefined {
     const cleaned = version.trim().replace(/^[\^~><= ]+/, '');
-    return semver.valid(cleaned) || semver.valid(semver.coerce(cleaned));
+    return semver.valid(cleaned) ?? semver.valid(semver.coerce(cleaned)) ?? undefined;
   }
 }
