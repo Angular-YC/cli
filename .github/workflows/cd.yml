@@ -79,14 +79,13 @@ jobs:
         id: version
         shell: bash
         run: |
-          PACKAGE_NAME="@angular-yc/cli"
-          LATEST_PUBLISHED="$(npm view "$PACKAGE_NAME" version --registry=https://npm.pkg.github.com 2>/dev/null || true)"
           PACKAGE_VERSION="$(node -p "require('./packages/angular-yc/package.json').version")"
+          LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
 
-          if [ -n "$LATEST_PUBLISHED" ]; then
-            BASE_VERSION="$LATEST_PUBLISHED"
+          if [ -n "$LATEST_TAG" ]; then
+            BASE_VERSION="${LATEST_TAG#v}"
             if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "Unsupported published version: $BASE_VERSION"
+              echo "Unsupported release tag version: $LATEST_TAG"
               exit 1
             fi
             NEXT_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
