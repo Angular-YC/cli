@@ -31,7 +31,9 @@ export class ManifestGenerator {
 
     const capabilitiesPath = path.join(buildDir, 'capabilities.json');
     if (!(await fs.pathExists(capabilitiesPath))) {
-      throw new Error('No manifest or capabilities file found. Please run "angular-yc build" first.');
+      throw new Error(
+        'No manifest or capabilities file found. Please run "angular-yc build" first.',
+      );
     }
 
     const capabilities = (await fs.readJson(capabilitiesPath)) as Capabilities;

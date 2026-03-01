@@ -178,7 +178,8 @@ export class CompatibilityChecker {
       responseCache: capabilities.responseCache.enabled,
     });
 
-    const normalized = this.normalizeVersion(capabilities.angularVersion) || capabilities.angularVersion;
+    const normalized =
+      this.normalizeVersion(capabilities.angularVersion) || capabilities.angularVersion;
 
     if (capabilities.rendering.hydration.incremental && semver.satisfies(normalized, '<19.0.0')) {
       result.errors.push('Incremental hydration requires Angular 19+');
@@ -199,7 +200,9 @@ export class CompatibilityChecker {
     }
 
     if (capabilities.prerender.enabled && capabilities.prerender.routes.length === 0) {
-      notes.push('Prerendering enabled without explicit routes; fallback to runtime route discovery.');
+      notes.push(
+        'Prerendering enabled without explicit routes; fallback to runtime route discovery.',
+      );
     }
 
     return {
@@ -271,6 +274,6 @@ export class CompatibilityChecker {
 
   private normalizeVersion(version: string): string | undefined {
     const cleaned = version.trim().replace(/^[\^~><= ]+/, '');
-    return semver.valid(cleaned) || semver.valid(semver.coerce(cleaned));
+    return semver.valid(cleaned) ?? semver.valid(semver.coerce(cleaned)) ?? undefined;
   }
 }
