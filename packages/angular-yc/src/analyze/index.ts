@@ -57,18 +57,34 @@ export class Analyzer {
     const ssr = await this.detectSSR(projectPath, projectConfig, angularVersion);
     const prerender = await this.detectPrerender(projectPath, projectConfig);
     const api = await this.detectAPI(projectPath, ssr.entrypoint);
-    const lazyLoading = await this.detectPatternUsage(projectPath, ['loadChildren', 'loadComponent']);
-    const signalsEnabled = await this.detectPatternUsage(projectPath, ['signal(', 'computed(', 'effect(']);
+    const lazyLoading = await this.detectPatternUsage(projectPath, [
+      'loadChildren',
+      'loadComponent',
+    ]);
+    const signalsEnabled = await this.detectPatternUsage(projectPath, [
+      'signal(',
+      'computed(',
+      'effect(',
+    ]);
     const linkedSignal = await this.detectPatternUsage(projectPath, ['linkedSignal(']);
     const resourceApi = await this.detectPatternUsage(projectPath, ['resource(']);
-    const hydrationEnabled = await this.detectPatternUsage(projectPath, ['provideClientHydration(']);
-    const incrementalHydration = await this.detectPatternUsage(projectPath, ['withIncrementalHydration(']);
+    const hydrationEnabled = await this.detectPatternUsage(projectPath, [
+      'provideClientHydration(',
+    ]);
+    const incrementalHydration = await this.detectPatternUsage(projectPath, [
+      'withIncrementalHydration(',
+    ]);
     const zonelessExperimental = await this.detectPatternUsage(projectPath, [
       'provideExperimentalZonelessChangeDetection(',
     ]);
-    const zonelessStable = await this.detectPatternUsage(projectPath, ['provideZonelessChangeDetection(']);
+    const zonelessStable = await this.detectPatternUsage(projectPath, [
+      'provideZonelessChangeDetection(',
+    ]);
     const standalone = await this.detectPatternUsage(projectPath, ['bootstrapApplication(']);
-    const ngOptimizedImage = await this.detectPatternUsage(projectPath, ['NgOptimizedImage', 'ngSrc']);
+    const ngOptimizedImage = await this.detectPatternUsage(projectPath, [
+      'NgOptimizedImage',
+      'ngSrc',
+    ]);
 
     const needsServer = ssr.enabled || api.enabled;
 
@@ -272,10 +288,7 @@ export class Analyzer {
     };
   }
 
-  private async detectAPI(
-    projectPath: string,
-    entrypoint?: string,
-  ): Promise<Capabilities['api']> {
+  private async detectAPI(projectPath: string, entrypoint?: string): Promise<Capabilities['api']> {
     const candidates = [entrypoint, 'server.ts', 'src/server.ts'].filter(Boolean) as string[];
 
     const routeSet = new Set<string>();
@@ -287,7 +300,9 @@ export class Analyzer {
       }
 
       const content = await fs.readFile(fullPath, 'utf-8');
-      const routeMatches = content.matchAll(/app\.(?:get|post|put|patch|delete|all|use)\((['"`])([^'"`]+)\1/g);
+      const routeMatches = content.matchAll(
+        /app\.(?:get|post|put|patch|delete|all|use)\((['"`])([^'"`]+)\1/g,
+      );
 
       for (const match of routeMatches) {
         const route = match[2];
@@ -361,15 +376,21 @@ export class Analyzer {
     console.log(chalk.gray(`  API routes: ${capabilities.api.enabled ? 'yes' : 'no'}`));
     console.log(chalk.gray(`  Needs server: ${capabilities.rendering.needsServer ? 'yes' : 'no'}`));
     console.log(chalk.gray(`  Lazy loading: ${capabilities.rendering.lazyLoading ? 'yes' : 'no'}`));
-    console.log(chalk.gray(`  Hydration: ${capabilities.rendering.hydration.enabled ? 'yes' : 'no'}`));
+    console.log(
+      chalk.gray(`  Hydration: ${capabilities.rendering.hydration.enabled ? 'yes' : 'no'}`),
+    );
     console.log(
       chalk.gray(
         `  Incremental hydration: ${capabilities.rendering.hydration.incremental ? 'yes' : 'no'}`,
       ),
     );
     console.log(chalk.gray(`  Signals: ${capabilities.rendering.signals.enabled ? 'yes' : 'no'}`));
-    console.log(chalk.gray(`  Zoneless: ${capabilities.rendering.zoneless.enabled ? 'yes' : 'no'}`));
-    console.log(chalk.gray(`  Image optimization: ${capabilities.assets.needsImage ? 'yes' : 'no'}`));
+    console.log(
+      chalk.gray(`  Zoneless: ${capabilities.rendering.zoneless.enabled ? 'yes' : 'no'}`),
+    );
+    console.log(
+      chalk.gray(`  Image optimization: ${capabilities.assets.needsImage ? 'yes' : 'no'}`),
+    );
 
     if (capabilities.notes.length > 0) {
       console.log(chalk.yellow('\n⚠️  Notes:'));

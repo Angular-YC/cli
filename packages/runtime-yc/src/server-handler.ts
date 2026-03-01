@@ -3,7 +3,11 @@ import path from 'path';
 import fs from 'fs';
 import { createHash } from 'crypto';
 import { parse as parseQuery } from 'querystring';
-import { createResponseCache, ResponseCache, ResponseCacheOptions } from './response-cache/cache.js';
+import {
+  createResponseCache,
+  ResponseCache,
+  ResponseCacheOptions,
+} from './response-cache/cache.js';
 
 export interface APIGatewayProxyEventV2 {
   version: string;
@@ -77,7 +81,9 @@ export function createServerHandler(options: HandlerOptions) {
   const initialize = async (): Promise<void> => {
     if (!responseCache) {
       const driver =
-        process.env.RESPONSE_CACHE_DRIVER === 'ydb' || cacheOptions.driver === 'ydb' ? 'ydb' : 'memory';
+        process.env.RESPONSE_CACHE_DRIVER === 'ydb' || cacheOptions.driver === 'ydb'
+          ? 'ydb'
+          : 'memory';
 
       const ydbEnabled =
         driver === 'ydb' &&
@@ -212,7 +218,9 @@ function normalizeNodeHandler(candidate: unknown): NodeRequestHandler {
     }
   }
 
-  throw new Error('Unsupported server export shape. Expected function or object with handle(req,res).');
+  throw new Error(
+    'Unsupported server export shape. Expected function or object with handle(req,res).',
+  );
 }
 
 function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: boolean) {
@@ -291,7 +299,9 @@ function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: bo
 
       const body = Buffer.concat(responseChunks);
       const contentType = responseHeaders['content-type'];
-      const isBase64 = shouldBase64Encode(Array.isArray(contentType) ? contentType[0] : contentType);
+      const isBase64 = shouldBase64Encode(
+        Array.isArray(contentType) ? contentType[0] : contentType,
+      );
 
       const result: APIGatewayProxyResultV2 = {
         statusCode,

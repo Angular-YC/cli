@@ -98,7 +98,9 @@ describe('CompatibilityChecker', () => {
 
       const result = checker.checkCompatibility(capabilities);
       expect(result.compatible).toBe(true);
-      expect(result.warnings).toContainEqual(expect.stringContaining('experimental before Angular 20'));
+      expect(result.warnings).toContainEqual(
+        expect.stringContaining('experimental before Angular 20'),
+      );
     });
 
     it('fails for unsupported Angular version', () => {
@@ -111,7 +113,9 @@ describe('CompatibilityChecker', () => {
       const capabilities = baseCapabilities('18.2.0');
       const result = checker.checkCompatibility(capabilities);
       expect(result.compatible).toBe(false);
-      expect(result.errors).toContainEqual(expect.stringContaining('Incremental hydration requires Angular 19+'));
+      expect(result.errors).toContainEqual(
+        expect.stringContaining('Incremental hydration requires Angular 19+'),
+      );
     });
 
     it('fails for linkedSignal on Angular 18', () => {
@@ -119,7 +123,9 @@ describe('CompatibilityChecker', () => {
       capabilities.rendering.hydration.incremental = false;
       const result = checker.checkCompatibility(capabilities);
       expect(result.compatible).toBe(false);
-      expect(result.errors).toContainEqual(expect.stringContaining('linkedSignal requires Angular 19+'));
+      expect(result.errors).toContainEqual(
+        expect.stringContaining('linkedSignal requires Angular 19+'),
+      );
     });
 
     it('adds note for static-only deployment', () => {

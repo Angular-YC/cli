@@ -147,9 +147,9 @@ describe('Uploader', () => {
       prefix: 'build-123',
     });
 
-    const zipUploads = vi.mocked(Upload).mock.calls.filter((call: any[]) =>
-      String(call[0]?.params?.Key || '').includes('.zip'),
-    );
+    const zipUploads = vi
+      .mocked(Upload)
+      .mock.calls.filter((call: any[]) => String(call[0]?.params?.Key || '').includes('.zip'));
 
     expect(zipUploads.length).toBeGreaterThanOrEqual(2);
   });
@@ -176,9 +176,11 @@ describe('Uploader', () => {
       prefix: 'build-123',
     });
 
-    const manifestUpload = vi.mocked(Upload).mock.calls.find((call: any[]) =>
-      String(call[0]?.params?.Key || '').includes('manifest.json'),
-    );
+    const manifestUpload = vi
+      .mocked(Upload)
+      .mock.calls.find((call: any[]) =>
+        String(call[0]?.params?.Key || '').includes('manifest.json'),
+      );
 
     expect(manifestUpload).toBeDefined();
   });

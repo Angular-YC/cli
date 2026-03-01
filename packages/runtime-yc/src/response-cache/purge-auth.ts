@@ -71,7 +71,10 @@ function verifyHmac(request: PurgeAuthRequest, config: PurgeAuthConfig): PurgeAu
     return { ok: false, reason: 'timestamp outside allowed skew' };
   }
 
-  const bodyHash = crypto.createHash('sha256').update(request.body || '').digest('hex');
+  const bodyHash = crypto
+    .createHash('sha256')
+    .update(request.body || '')
+    .digest('hex');
   const canonical = `${request.method.toUpperCase()}\n${request.path}\n${timestamp}\n${bodyHash}`;
   const expected = crypto.createHmac('sha256', config.secret).update(canonical).digest('hex');
 

@@ -89,7 +89,10 @@ export class Uploader {
 
       if (cacheBucket) {
         spinner.start('Initializing response cache bucket...');
-        const cacheKeys = [`${prefix}/response-cache/.initialized`, `${prefix}/cache-metadata/.initialized`];
+        const cacheKeys = [
+          `${prefix}/response-cache/.initialized`,
+          `${prefix}/cache-metadata/.initialized`,
+        ];
 
         for (const key of cacheKeys) {
           if (!dryRun) {
