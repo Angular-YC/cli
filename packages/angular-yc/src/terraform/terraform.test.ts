@@ -1,5 +1,11 @@
+import fs from 'fs-extra';
 import { describe, expect, it } from 'vitest';
-import { extractOutputString, resolveBackendConfig } from './index.js';
+import {
+  cleanupTerraformProject,
+  extractOutputString,
+  prepareTerraformProject,
+  resolveBackendConfig,
+} from './index.js';
 
 describe('resolveBackendConfig', () => {
   it('returns null when state bucket/key are missing', () => {
@@ -68,5 +74,25 @@ describe('extractOutputString', () => {
     expect(
       extractOutputString({ assets_bucket: { value: '  ' } }, 'assets_bucket'),
     ).toBeUndefined();
+  });
+});
+
+describe('prepareTerraformProject', () => {
+  it('creates a working directory from embedded terraform template', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      expect(await fs.pathExists(terraformDir)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/backend.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/main.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/providers.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/versions.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/variables.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/outputs.tf`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/templates/openapi.yaml.tpl`)).toBe(true);
+      expect(await fs.pathExists(`${terraformDir}/modules/core_security/main.tf`)).toBe(true);
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
   });
 });

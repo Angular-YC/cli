@@ -8,7 +8,13 @@ import { Analyzer } from './analyze/index.js';
 import { Builder } from './build/index.js';
 import { ManifestGenerator } from './manifest/index.js';
 import { Uploader } from './upload/index.js';
-import { extractOutputString, resolveBackendConfig, TerraformRunner } from './terraform/index.js';
+import {
+  cleanupTerraformProject,
+  extractOutputString,
+  prepareTerraformProject,
+  resolveBackendConfig,
+  TerraformRunner,
+} from './terraform/index.js';
 import {
   firstDefined,
   getConfigBoolean,
@@ -205,10 +211,8 @@ program
   .description('Initialize Terraform backend and create deployment buckets')
   .option('-p, --project <path>', 'Path to Angular project')
   .option('--config <path>', 'Path to angular-yc config file')
-  .option('-t, --terraform-dir <dir>', 'Terraform directory')
   .option('-o, --output <dir>', 'Output directory for analysis/manifest')
   .option('--project-name <name>', 'Angular project name from angular.json')
-  .option('--module-name <name>', 'Terraform module name in root config')
   .option('--app-name <name>', 'Terraform variable app_name')
   .option('--environment <name>', 'Terraform variable env')
   .option('--domain-name <name>', 'Terraform variable domain_name')
@@ -270,20 +274,6 @@ program
           './build',
         ) as string,
       );
-      const terraformDir = path.resolve(
-        firstDefined(
-          cliOptionValue(command, 'terraformDir', options.terraformDir as string | undefined),
-          getEnvString(env, 'AYC_TERRAFORM_DIR'),
-          getConfigString(mergedConfig, 'terraformDir'),
-          'infra/yandex',
-        ) as string,
-      );
-      const moduleName = firstDefined(
-        cliOptionValue(command, 'moduleName', options.moduleName as string | undefined),
-        getEnvString(env, 'AYC_MODULE_NAME'),
-        getConfigString(mergedConfig, 'moduleName'),
-        'angular_app',
-      ) as string;
 
       const backend = resolveBackendConfig(
         buildBackendInput({
@@ -344,121 +334,136 @@ program
         );
       }
 
-      const analyzer = new Analyzer();
-      const generator = new ManifestGenerator();
-      const terraform = new TerraformRunner(terraformDir);
+      const terraformDir = await prepareTerraformProject();
 
-      await analyzer.analyze({
-        projectPath,
-        projectName,
-        outputDir,
-        verbose: options.verbose,
-      });
+      try {
+        const analyzer = new Analyzer();
+        const generator = new ManifestGenerator();
+        const terraform = new TerraformRunner(terraformDir);
 
-      await generator.generate({
-        buildDir: outputDir,
-        outputPath: path.join(outputDir, 'deploy.manifest.json'),
-        verbose: options.verbose,
-      });
+        await analyzer.analyze({
+          projectPath,
+          projectName,
+          outputDir,
+          verbose: options.verbose,
+        });
 
-      await terraform.init(backend);
+        const manifestPath = path.join(outputDir, 'deploy.manifest.json');
 
-      const targets = [`module.${moduleName}.yandex_storage_bucket.assets`];
-      if (options.cacheBucket) {
-        targets.push(`module.${moduleName}.yandex_storage_bucket.cache`);
-      }
+        await generator.generate({
+          buildDir: outputDir,
+          outputPath: manifestPath,
+          verbose: options.verbose,
+        });
 
-      const terraformVarEnv = buildTerraformVarEnv({
-        appName: firstDefined(
-          cliOptionValue(command, 'appName', options.appName as string | undefined),
-          getEnvString(env, 'AYC_APP_NAME'),
-          getConfigString(mergedConfig, 'appName'),
-        ),
-        environment: firstDefined(
-          cliOptionValue(command, 'environment', options.environment as string | undefined),
-          getEnvString(env, 'AYC_ENV'),
-          getConfigString(mergedConfig, 'environment'),
-        ),
-        domainName: firstDefined(
-          cliOptionValue(command, 'domainName', options.domainName as string | undefined),
-          getEnvString(env, 'AYC_DOMAIN_NAME'),
-          getConfigString(mergedConfig, 'domainName'),
-        ),
-        cloudId: firstDefined(
-          getEnvString(env, 'AYC_CLOUD_ID'),
-          getConfigString(mergedConfig, 'cloudId'),
-        ),
-        folderId: firstDefined(
-          getEnvString(env, 'AYC_FOLDER_ID'),
-          getConfigString(mergedConfig, 'folderId'),
-        ),
-        iamToken: firstDefined(
-          getEnvString(env, 'AYC_IAM_TOKEN'),
-          getConfigString(mergedConfig, 'iamToken'),
-        ),
-        zone: firstDefined(getEnvString(env, 'AYC_ZONE'), getConfigString(mergedConfig, 'zone')),
-        region: firstDefined(
-          getEnvString(env, 'AYC_REGION'),
-          getConfigString(mergedConfig, 'region'),
-        ),
-        dnsZoneId: firstDefined(
-          getEnvString(env, 'AYC_DNS_ZONE_ID'),
-          getConfigString(mergedConfig, 'dnsZoneId'),
-        ),
-        certificateId: firstDefined(
-          getEnvString(env, 'AYC_CERTIFICATE_ID'),
-          getConfigString(mergedConfig, 'certificateId'),
-        ),
-        createDnsZone: firstDefined(
-          getEnvBoolean(env, 'AYC_CREATE_DNS_ZONE'),
-          getConfigBoolean(mergedConfig, 'createDnsZone'),
-        ),
-        storageAccessKey: firstDefined(
-          getEnvString(env, 'AYC_STORAGE_ACCESS_KEY'),
-          getConfigString(mergedConfig, 'storageAccessKey'),
-        ),
-        storageSecretKey: firstDefined(
-          getEnvString(env, 'AYC_STORAGE_SECRET_KEY'),
-          getConfigString(mergedConfig, 'storageSecretKey'),
-        ),
-        configTfVars: collectTfVarsFromConfig(mergedConfig),
-        envTfVars: collectTfVarsFromEnv(env),
-        tfVarAssignments: parseTfVarAssignments(
-          cliOptionValue(command, 'tfVar', options.tfVar as string[]) || [],
-        ),
-      });
+        await terraform.init(backend);
 
-      await terraform.apply({
-        targets,
-        autoApprove:
-          firstDefined(
-            cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
-            getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
-            getConfigBoolean(mergedConfig, 'autoApprove'),
-          ) || false,
-        env: terraformVarEnv,
-      });
+        const targets = ['yandex_storage_bucket.assets'];
+        if (options.cacheBucket) {
+          targets.push('yandex_storage_bucket.cache');
+        }
 
-      const outputs = await terraform.readOutputs();
-      const assetsBucket = extractOutputString(outputs, 'assets_bucket');
-      const cacheBucket = extractOutputString(outputs, 'cache_bucket');
-
-      console.log(chalk.green('✅ Bootstrap complete'));
-      if (assetsBucket) {
-        console.log(chalk.cyan('📦 Assets bucket:'), assetsBucket);
-      }
-      if (cacheBucket) {
-        console.log(chalk.cyan('🗄️ Cache bucket:'), cacheBucket);
-      }
-      if (!assetsBucket) {
-        console.log(
-          chalk.yellow(
-            '⚠️ assets_bucket output is not available yet. Check terraform outputs or module configuration.',
+        const terraformVarEnv = buildTerraformVarEnv({
+          appName: firstDefined(
+            cliOptionValue(command, 'appName', options.appName as string | undefined),
+            getEnvString(env, 'AYC_APP_NAME'),
+            getConfigString(mergedConfig, 'appName'),
           ),
-        );
-      }
-      if (options.verbose && loadedConfig.path) {
-        console.log(chalk.gray(`Config: ${loadedConfig.path}`));
+          environment: firstDefined(
+            cliOptionValue(command, 'environment', options.environment as string | undefined),
+            getEnvString(env, 'AYC_ENV'),
+            getConfigString(mergedConfig, 'environment'),
+          ),
+          domainName: firstDefined(
+            cliOptionValue(command, 'domainName', options.domainName as string | undefined),
+            getEnvString(env, 'AYC_DOMAIN_NAME'),
+            getConfigString(mergedConfig, 'domainName'),
+          ),
+          cloudId: firstDefined(
+            getEnvString(env, 'AYC_CLOUD_ID'),
+            getConfigString(mergedConfig, 'cloudId'),
+          ),
+          folderId: firstDefined(
+            getEnvString(env, 'AYC_FOLDER_ID'),
+            getConfigString(mergedConfig, 'folderId'),
+          ),
+          iamToken: firstDefined(
+            getEnvString(env, 'AYC_IAM_TOKEN'),
+            getConfigString(mergedConfig, 'iamToken'),
+          ),
+          zone: firstDefined(getEnvString(env, 'AYC_ZONE'), getConfigString(mergedConfig, 'zone')),
+          region: firstDefined(
+            getEnvString(env, 'AYC_REGION'),
+            getConfigString(mergedConfig, 'region'),
+          ),
+          dnsZoneId: firstDefined(
+            getEnvString(env, 'AYC_DNS_ZONE_ID'),
+            getConfigString(mergedConfig, 'dnsZoneId'),
+          ),
+          certificateId: firstDefined(
+            getEnvString(env, 'AYC_CERTIFICATE_ID'),
+            getConfigString(mergedConfig, 'certificateId'),
+          ),
+          createDnsZone: firstDefined(
+            getEnvBoolean(env, 'AYC_CREATE_DNS_ZONE'),
+            getConfigBoolean(mergedConfig, 'createDnsZone'),
+          ),
+          storageAccessKey: firstDefined(
+            getEnvString(env, 'AYC_STORAGE_ACCESS_KEY'),
+            getConfigString(mergedConfig, 'storageAccessKey'),
+          ),
+          storageSecretKey: firstDefined(
+            getEnvString(env, 'AYC_STORAGE_SECRET_KEY'),
+            getConfigString(mergedConfig, 'storageSecretKey'),
+          ),
+          configTfVars: collectTfVarsFromConfig(mergedConfig),
+          envTfVars: collectTfVarsFromEnv(env),
+          tfVarAssignments: parseTfVarAssignments(
+            cliOptionValue(command, 'tfVar', options.tfVar as string[]) || [],
+          ),
+        });
+
+        const applyEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          ...terraformVarEnv,
+          TF_VAR_manifest_path: manifestPath,
+          TF_VAR_build_dir: outputDir,
+        };
+
+        await terraform.apply({
+          targets,
+          autoApprove:
+            firstDefined(
+              cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
+              getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
+              getConfigBoolean(mergedConfig, 'autoApprove'),
+            ) || false,
+          env: applyEnv,
+        });
+
+        const outputs = await terraform.readOutputs();
+        const assetsBucket = extractOutputString(outputs, 'assets_bucket');
+        const cacheBucket = extractOutputString(outputs, 'cache_bucket');
+
+        console.log(chalk.green('✅ Bootstrap complete'));
+        if (assetsBucket) {
+          console.log(chalk.cyan('📦 Assets bucket:'), assetsBucket);
+        }
+        if (cacheBucket) {
+          console.log(chalk.cyan('🗄️ Cache bucket:'), cacheBucket);
+        }
+        if (!assetsBucket) {
+          console.log(
+            chalk.yellow(
+              '⚠️ assets_bucket output is not available yet. Check terraform outputs or module configuration.',
+            ),
+          );
+        }
+        if (options.verbose && loadedConfig.path) {
+          console.log(chalk.gray(`Config: ${loadedConfig.path}`));
+        }
+      } finally {
+        await cleanupTerraformProject(terraformDir);
       }
     } catch (error) {
       console.error(
@@ -478,7 +483,6 @@ program
   .option('--project-name <name>', 'Angular project name from angular.json')
   .option('-b, --build-id <id>', 'Custom build ID')
   .option('--skip-build', 'Skip Angular build and package existing dist')
-  .option('-t, --terraform-dir <dir>', 'Terraform directory')
   .option('--bucket <name>', 'Assets bucket name (or resolve from terraform output)')
   .option('--cache-bucket <name>', 'Cache bucket name (or resolve from terraform output)')
   .option('--prefix <prefix>', 'Upload key prefix (defaults to buildId from manifest)')
@@ -538,14 +542,6 @@ program
           './build',
         ) as string,
       );
-      const terraformDir = path.resolve(
-        firstDefined(
-          cliOptionValue(command, 'terraformDir', options.terraformDir as string | undefined),
-          getEnvString(env, 'AYC_TERRAFORM_DIR'),
-          getConfigString(mergedConfig, 'terraformDir'),
-          'infra/yandex',
-        ) as string,
-      );
       const deployRegion = firstDefined(
         cliOptionValue(command, 'region', options.region as string | undefined),
         getEnvString(env, 'AYC_REGION'),
@@ -559,202 +555,218 @@ program
         'https://storage.yandexcloud.net',
       ) as string;
 
-      const builder = new Builder();
-      const uploader = new Uploader();
-      const terraform = new TerraformRunner(terraformDir);
+      const terraformDir = await prepareTerraformProject();
 
-      const backend = resolveBackendConfig(
-        buildBackendInput({
-          stateBucket: firstDefined(
-            cliOptionValue(command, 'stateBucket', options.stateBucket as string | undefined),
-            getEnvString(env, 'AYC_STATE_BUCKET'),
-            getConfigString(mergedConfig, 'stateBucket'),
+      try {
+        const builder = new Builder();
+        const uploader = new Uploader();
+        const terraform = new TerraformRunner(terraformDir);
+
+        const backend = resolveBackendConfig(
+          buildBackendInput({
+            stateBucket: firstDefined(
+              cliOptionValue(command, 'stateBucket', options.stateBucket as string | undefined),
+              getEnvString(env, 'AYC_STATE_BUCKET'),
+              getConfigString(mergedConfig, 'stateBucket'),
+            ),
+            stateKey: firstDefined(
+              cliOptionValue(command, 'stateKey', options.stateKey as string | undefined),
+              getEnvString(env, 'AYC_STATE_KEY'),
+              getConfigString(mergedConfig, 'stateKey'),
+            ),
+            stateRegion: firstDefined(
+              cliOptionValue(command, 'stateRegion', options.stateRegion as string | undefined),
+              getEnvString(env, 'AYC_STATE_REGION'),
+              getConfigString(mergedConfig, 'stateRegion'),
+            ),
+            stateEndpoint: firstDefined(
+              cliOptionValue(command, 'stateEndpoint', options.stateEndpoint as string | undefined),
+              getEnvString(env, 'AYC_STATE_ENDPOINT'),
+              getConfigString(mergedConfig, 'stateEndpoint'),
+              'https://storage.yandexcloud.net',
+            ),
+            stateAccessKey: firstDefined(
+              cliOptionValue(
+                command,
+                'stateAccessKey',
+                options.stateAccessKey as string | undefined,
+              ),
+              getEnvString(env, 'AYC_STATE_ACCESS_KEY'),
+              getConfigString(mergedConfig, 'stateAccessKey'),
+            ),
+            stateSecretKey: firstDefined(
+              cliOptionValue(
+                command,
+                'stateSecretKey',
+                options.stateSecretKey as string | undefined,
+              ),
+              getEnvString(env, 'AYC_STATE_SECRET_KEY'),
+              getConfigString(mergedConfig, 'stateSecretKey'),
+            ),
+          }),
+          {
+            ...env,
+            YC_REGION: firstDefined(getEnvString(env, 'YC_REGION'), deployRegion),
+            YC_ACCESS_KEY: firstDefined(
+              getEnvString(env, 'AYC_STORAGE_ACCESS_KEY'),
+              getConfigString(mergedConfig, 'storageAccessKey'),
+              getEnvString(env, 'YC_ACCESS_KEY'),
+            ),
+            YC_SECRET_KEY: firstDefined(
+              getEnvString(env, 'AYC_STORAGE_SECRET_KEY'),
+              getConfigString(mergedConfig, 'storageSecretKey'),
+              getEnvString(env, 'YC_SECRET_KEY'),
+            ),
+          },
+        );
+        await terraform.init(backend || undefined);
+
+        const manifest = await builder.build({
+          projectPath,
+          outputDir,
+          projectName: firstDefined(
+            cliOptionValue(command, 'projectName', options.projectName as string | undefined),
+            getEnvString(env, 'AYC_PROJECT_NAME'),
+            getConfigString(mergedConfig, 'projectName'),
           ),
-          stateKey: firstDefined(
-            cliOptionValue(command, 'stateKey', options.stateKey as string | undefined),
-            getEnvString(env, 'AYC_STATE_KEY'),
-            getConfigString(mergedConfig, 'stateKey'),
+          buildId: firstDefined(
+            cliOptionValue(command, 'buildId', options.buildId as string | undefined),
+            getEnvString(env, 'AYC_BUILD_ID'),
+            getConfigString(mergedConfig, 'buildId'),
           ),
-          stateRegion: firstDefined(
-            cliOptionValue(command, 'stateRegion', options.stateRegion as string | undefined),
-            getEnvString(env, 'AYC_STATE_REGION'),
-            getConfigString(mergedConfig, 'stateRegion'),
+          verbose: options.verbose,
+          skipBuild:
+            firstDefined(
+              cliOptionValue(command, 'skipBuild', options.skipBuild as boolean),
+              getEnvBoolean(env, 'AYC_SKIP_BUILD'),
+              getConfigBoolean(mergedConfig, 'skipBuild'),
+            ) || false,
+        });
+
+        const outputs = await terraform.readOutputs();
+
+        const assetsBucket =
+          firstDefined(cliOptionValue(command, 'bucket', options.bucket as string | undefined)) ||
+          extractOutputString(outputs, 'assets_bucket');
+
+        if (!assetsBucket) {
+          throw new Error(
+            'Assets bucket is required for upload. Run "angular-yc bootstrap" first or provide --bucket.',
+          );
+        }
+
+        const cacheBucket =
+          firstDefined(
+            cliOptionValue(command, 'cacheBucket', options.cacheBucket as string | undefined),
+          ) || extractOutputString(outputs, 'cache_bucket');
+        const prefix =
+          firstDefined(
+            cliOptionValue(command, 'prefix', options.prefix as string | undefined),
+            getEnvString(env, 'AYC_PREFIX'),
+            getConfigString(mergedConfig, 'prefix'),
+          ) ||
+          manifest.buildId ||
+          (await readBuildIdFromManifest(outputDir));
+
+        await uploader.upload({
+          buildDir: outputDir,
+          assetsBucket,
+          prefix,
+          cacheBucket,
+          region: deployRegion,
+          endpoint: deployEndpoint,
+          verbose: options.verbose,
+        });
+
+        const terraformVarEnv = buildTerraformVarEnv({
+          appName: firstDefined(
+            cliOptionValue(command, 'appName', options.appName as string | undefined),
+            getEnvString(env, 'AYC_APP_NAME'),
+            getConfigString(mergedConfig, 'appName'),
           ),
-          stateEndpoint: firstDefined(
-            cliOptionValue(command, 'stateEndpoint', options.stateEndpoint as string | undefined),
-            getEnvString(env, 'AYC_STATE_ENDPOINT'),
-            getConfigString(mergedConfig, 'stateEndpoint'),
-            'https://storage.yandexcloud.net',
+          environment: firstDefined(
+            cliOptionValue(command, 'environment', options.environment as string | undefined),
+            getEnvString(env, 'AYC_ENV'),
+            getConfigString(mergedConfig, 'environment'),
           ),
-          stateAccessKey: firstDefined(
-            cliOptionValue(command, 'stateAccessKey', options.stateAccessKey as string | undefined),
-            getEnvString(env, 'AYC_STATE_ACCESS_KEY'),
-            getConfigString(mergedConfig, 'stateAccessKey'),
+          domainName: firstDefined(
+            cliOptionValue(command, 'domainName', options.domainName as string | undefined),
+            getEnvString(env, 'AYC_DOMAIN_NAME'),
+            getConfigString(mergedConfig, 'domainName'),
           ),
-          stateSecretKey: firstDefined(
-            cliOptionValue(command, 'stateSecretKey', options.stateSecretKey as string | undefined),
-            getEnvString(env, 'AYC_STATE_SECRET_KEY'),
-            getConfigString(mergedConfig, 'stateSecretKey'),
+          cloudId: firstDefined(
+            getEnvString(env, 'AYC_CLOUD_ID'),
+            getConfigString(mergedConfig, 'cloudId'),
           ),
-        }),
-        {
-          ...env,
-          YC_REGION: firstDefined(getEnvString(env, 'YC_REGION'), deployRegion),
-          YC_ACCESS_KEY: firstDefined(
+          folderId: firstDefined(
+            getEnvString(env, 'AYC_FOLDER_ID'),
+            getConfigString(mergedConfig, 'folderId'),
+          ),
+          iamToken: firstDefined(
+            getEnvString(env, 'AYC_IAM_TOKEN'),
+            getConfigString(mergedConfig, 'iamToken'),
+          ),
+          zone: firstDefined(getEnvString(env, 'AYC_ZONE'), getConfigString(mergedConfig, 'zone')),
+          region: firstDefined(
+            getEnvString(env, 'AYC_REGION'),
+            getConfigString(mergedConfig, 'region'),
+          ),
+          dnsZoneId: firstDefined(
+            getEnvString(env, 'AYC_DNS_ZONE_ID'),
+            getConfigString(mergedConfig, 'dnsZoneId'),
+          ),
+          certificateId: firstDefined(
+            getEnvString(env, 'AYC_CERTIFICATE_ID'),
+            getConfigString(mergedConfig, 'certificateId'),
+          ),
+          createDnsZone: firstDefined(
+            getEnvBoolean(env, 'AYC_CREATE_DNS_ZONE'),
+            getConfigBoolean(mergedConfig, 'createDnsZone'),
+          ),
+          storageAccessKey: firstDefined(
             getEnvString(env, 'AYC_STORAGE_ACCESS_KEY'),
             getConfigString(mergedConfig, 'storageAccessKey'),
-            getEnvString(env, 'YC_ACCESS_KEY'),
           ),
-          YC_SECRET_KEY: firstDefined(
+          storageSecretKey: firstDefined(
             getEnvString(env, 'AYC_STORAGE_SECRET_KEY'),
             getConfigString(mergedConfig, 'storageSecretKey'),
-            getEnvString(env, 'YC_SECRET_KEY'),
           ),
-        },
-      );
-      await terraform.init(backend || undefined);
+          configTfVars: collectTfVarsFromConfig(mergedConfig),
+          envTfVars: collectTfVarsFromEnv(env),
+          tfVarAssignments: parseTfVarAssignments(
+            cliOptionValue(command, 'tfVar', options.tfVar as string[]) || [],
+          ),
+        });
 
-      const manifest = await builder.build({
-        projectPath,
-        outputDir,
-        projectName: firstDefined(
-          cliOptionValue(command, 'projectName', options.projectName as string | undefined),
-          getEnvString(env, 'AYC_PROJECT_NAME'),
-          getConfigString(mergedConfig, 'projectName'),
-        ),
-        buildId: firstDefined(
-          cliOptionValue(command, 'buildId', options.buildId as string | undefined),
-          getEnvString(env, 'AYC_BUILD_ID'),
-          getConfigString(mergedConfig, 'buildId'),
-        ),
-        verbose: options.verbose,
-        skipBuild:
-          firstDefined(
-            cliOptionValue(command, 'skipBuild', options.skipBuild as boolean),
-            getEnvBoolean(env, 'AYC_SKIP_BUILD'),
-            getConfigBoolean(mergedConfig, 'skipBuild'),
-          ) || false,
-      });
+        const applyEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          ...terraformVarEnv,
+          TF_VAR_manifest_path: path.join(outputDir, 'deploy.manifest.json'),
+          TF_VAR_build_dir: outputDir,
+          TF_VAR_assets_bucket_name: assetsBucket,
+        };
+        if (cacheBucket) {
+          applyEnv.TF_VAR_cache_bucket_name = cacheBucket;
+        }
 
-      const outputs = await terraform.readOutputs();
+        await terraform.apply({
+          autoApprove:
+            firstDefined(
+              cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
+              getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
+              getConfigBoolean(mergedConfig, 'autoApprove'),
+            ) || false,
+          env: applyEnv,
+        });
 
-      const assetsBucket =
-        firstDefined(cliOptionValue(command, 'bucket', options.bucket as string | undefined)) ||
-        extractOutputString(outputs, 'assets_bucket');
-
-      if (!assetsBucket) {
-        throw new Error(
-          'Assets bucket is required for upload. Run "angular-yc bootstrap" first or provide --bucket.',
-        );
-      }
-
-      const cacheBucket =
-        firstDefined(
-          cliOptionValue(command, 'cacheBucket', options.cacheBucket as string | undefined),
-        ) || extractOutputString(outputs, 'cache_bucket');
-      const prefix =
-        firstDefined(
-          cliOptionValue(command, 'prefix', options.prefix as string | undefined),
-          getEnvString(env, 'AYC_PREFIX'),
-          getConfigString(mergedConfig, 'prefix'),
-        ) ||
-        manifest.buildId ||
-        (await readBuildIdFromManifest(outputDir));
-
-      await uploader.upload({
-        buildDir: outputDir,
-        assetsBucket,
-        prefix,
-        cacheBucket,
-        region: deployRegion,
-        endpoint: deployEndpoint,
-        verbose: options.verbose,
-      });
-
-      const terraformVarEnv = buildTerraformVarEnv({
-        appName: firstDefined(
-          cliOptionValue(command, 'appName', options.appName as string | undefined),
-          getEnvString(env, 'AYC_APP_NAME'),
-          getConfigString(mergedConfig, 'appName'),
-        ),
-        environment: firstDefined(
-          cliOptionValue(command, 'environment', options.environment as string | undefined),
-          getEnvString(env, 'AYC_ENV'),
-          getConfigString(mergedConfig, 'environment'),
-        ),
-        domainName: firstDefined(
-          cliOptionValue(command, 'domainName', options.domainName as string | undefined),
-          getEnvString(env, 'AYC_DOMAIN_NAME'),
-          getConfigString(mergedConfig, 'domainName'),
-        ),
-        cloudId: firstDefined(
-          getEnvString(env, 'AYC_CLOUD_ID'),
-          getConfigString(mergedConfig, 'cloudId'),
-        ),
-        folderId: firstDefined(
-          getEnvString(env, 'AYC_FOLDER_ID'),
-          getConfigString(mergedConfig, 'folderId'),
-        ),
-        iamToken: firstDefined(
-          getEnvString(env, 'AYC_IAM_TOKEN'),
-          getConfigString(mergedConfig, 'iamToken'),
-        ),
-        zone: firstDefined(getEnvString(env, 'AYC_ZONE'), getConfigString(mergedConfig, 'zone')),
-        region: firstDefined(
-          getEnvString(env, 'AYC_REGION'),
-          getConfigString(mergedConfig, 'region'),
-        ),
-        dnsZoneId: firstDefined(
-          getEnvString(env, 'AYC_DNS_ZONE_ID'),
-          getConfigString(mergedConfig, 'dnsZoneId'),
-        ),
-        certificateId: firstDefined(
-          getEnvString(env, 'AYC_CERTIFICATE_ID'),
-          getConfigString(mergedConfig, 'certificateId'),
-        ),
-        createDnsZone: firstDefined(
-          getEnvBoolean(env, 'AYC_CREATE_DNS_ZONE'),
-          getConfigBoolean(mergedConfig, 'createDnsZone'),
-        ),
-        storageAccessKey: firstDefined(
-          getEnvString(env, 'AYC_STORAGE_ACCESS_KEY'),
-          getConfigString(mergedConfig, 'storageAccessKey'),
-        ),
-        storageSecretKey: firstDefined(
-          getEnvString(env, 'AYC_STORAGE_SECRET_KEY'),
-          getConfigString(mergedConfig, 'storageSecretKey'),
-        ),
-        configTfVars: collectTfVarsFromConfig(mergedConfig),
-        envTfVars: collectTfVarsFromEnv(env),
-        tfVarAssignments: parseTfVarAssignments(
-          cliOptionValue(command, 'tfVar', options.tfVar as string[]) || [],
-        ),
-      });
-
-      const applyEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        ...terraformVarEnv,
-        TF_VAR_assets_bucket_name: assetsBucket,
-      };
-      if (cacheBucket) {
-        applyEnv.TF_VAR_cache_bucket_name = cacheBucket;
-      }
-
-      await terraform.apply({
-        autoApprove:
-          firstDefined(
-            cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
-            getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
-            getConfigBoolean(mergedConfig, 'autoApprove'),
-          ) || false,
-        env: applyEnv,
-      });
-
-      console.log(chalk.green('✅ Deploy complete'));
-      console.log(chalk.cyan('📦 Assets bucket:'), assetsBucket);
-      console.log(chalk.cyan('🆔 Build ID:'), prefix);
-      if (options.verbose && loadedConfig.path) {
-        console.log(chalk.gray(`Config: ${loadedConfig.path}`));
+        console.log(chalk.green('✅ Deploy complete'));
+        console.log(chalk.cyan('📦 Assets bucket:'), assetsBucket);
+        console.log(chalk.cyan('🆔 Build ID:'), prefix);
+        if (options.verbose && loadedConfig.path) {
+          console.log(chalk.gray(`Config: ${loadedConfig.path}`));
+        }
+      } finally {
+        await cleanupTerraformProject(terraformDir);
       }
     } catch (error) {
       console.error(

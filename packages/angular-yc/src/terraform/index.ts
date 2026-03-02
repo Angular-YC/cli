@@ -1,4 +1,8 @@
+import fs from 'fs-extra';
+import os from 'os';
+import path from 'path';
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 export interface TerraformBackendConfig {
   bucket: string;
@@ -34,6 +38,9 @@ export interface TerraformBackendInput {
   stateAccessKey?: string;
   stateSecretKey?: string;
 }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TERRAFORM_TEMPLATE_DIR = path.join(__dirname, 'project');
 
 export function resolveBackendConfig(
   input: TerraformBackendInput,
@@ -87,6 +94,20 @@ export function extractOutputString(
   }
 
   return value;
+}
+
+export async function prepareTerraformProject(): Promise<string> {
+  if (!(await fs.pathExists(TERRAFORM_TEMPLATE_DIR))) {
+    throw new Error(`Embedded terraform template not found: ${TERRAFORM_TEMPLATE_DIR}`);
+  }
+
+  const workingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'angular-yc-terraform-'));
+  await fs.copy(TERRAFORM_TEMPLATE_DIR, workingDir);
+  return workingDir;
+}
+
+export async function cleanupTerraformProject(terraformDir: string): Promise<void> {
+  await fs.remove(terraformDir);
 }
 
 export class TerraformRunner {

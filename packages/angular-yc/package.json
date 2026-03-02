@@ -23,7 +23,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && cp src/compat/compat.yml dist/compat/compat.yml && chmod +x dist/index.js",
+    "build": "tsc && cp src/compat/compat.yml dist/compat/compat.yml && cp -r src/terraform/project dist/terraform/project && chmod +x dist/index.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run --passWithNoTests",
