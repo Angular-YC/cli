@@ -398,61 +398,6 @@ export const handler = createImageHandler({
     return undefined;
   }
 
-  private async resolvePackageJsonPath(packageName: string): Promise<string> {
-    try {
-      return require.resolve(`${packageName}/package.json`);
-    } catch {
-      const entryPath = require.resolve(packageName);
-      const packageRoot = await this.findPackageRootFromEntry(entryPath, packageName);
-      if (!packageRoot) {
-        throw new Error(
-          `Unable to resolve package.json for "${packageName}" (resolved entry: ${entryPath})`,
-        );
-      }
-      return path.join(packageRoot, 'package.json');
-    }
-  }
-
-  private async findPackageRootFromEntry(
-    entryPath: string,
-    packageName: string,
-  ): Promise<string | undefined> {
-    let currentDir = path.dirname(entryPath);
-    const filesystemRoot = path.parse(currentDir).root;
-
-    while (true) {
-      const candidatePackageJson = path.join(currentDir, 'package.json');
-      if (await fs.pathExists(candidatePackageJson)) {
-        try {
-          const candidatePackage = await fs.readJson(candidatePackageJson);
-          if (candidatePackage?.name === packageName) {
-            return currentDir;
-          }
-        } catch {
-          // Ignore invalid package metadata while walking up.
-        }
-      }
-
-      if (currentDir === filesystemRoot || path.basename(currentDir) === 'node_modules') {
-        break;
-      }
-
-      const parentDir = path.dirname(currentDir);
-      if (parentDir === currentDir) {
-        break;
-      }
-      currentDir = parentDir;
-    }
-
-    const nodeModulesSegment = path.join('node_modules', packageName);
-    const segmentIndex = entryPath.lastIndexOf(nodeModulesSegment);
-    if (segmentIndex >= 0) {
-      return entryPath.slice(0, segmentIndex + nodeModulesSegment.length);
-    }
-
-    return undefined;
-  }
-
   private async copyStaticAssets(
     projectPath: string,
     artifactsDir: string,
