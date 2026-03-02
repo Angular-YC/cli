@@ -757,6 +757,7 @@ program
           ...terraformVarEnv,
           TF_VAR_manifest_path: path.join(outputDir, 'deploy.manifest.json'),
           TF_VAR_build_dir: outputDir,
+          TF_VAR_artifact_prefix: prefix,
         };
         if (explicitAssetsBucket) {
           applyEnv.TF_VAR_assets_bucket_name = explicitAssetsBucket;
