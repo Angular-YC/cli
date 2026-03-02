@@ -52,6 +52,12 @@ describe('Builder', () => {
         };
       }
 
+      if (p.includes('@angular-yc/runtime') || p.includes('runtime-yc/package.json')) {
+        return {
+          dependencies: {},
+        };
+      }
+
       return {
         scripts: {
           build: 'ng build',
@@ -269,9 +275,13 @@ describe('Builder', () => {
 
     await builder.build({ projectPath: mockProjectPath, outputDir: mockOutputPath, skipBuild: true });
 
-    expect(fs.copy).toHaveBeenCalledWith(
-      expect.stringMatching(/runtime-yc\/(dist|src)$/),
-      expect.stringContaining('runtime'),
+    const copyCalls = vi.mocked(fs.copy).mock.calls.map((call) => ({
+      source: call[0].toString(),
+      dest: call[1].toString(),
+    }));
+
+    expect(copyCalls.some((call) => call.dest.includes('node_modules/@angular-yc/runtime'))).toBe(
+      true,
     );
   });
 

@@ -2,7 +2,6 @@ import fs from 'fs-extra';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import archiver from 'archiver';
 import chalk from 'chalk';
@@ -11,7 +10,6 @@ import { Analyzer } from '../analyze/index.js';
 import { createDefaultManifest, DeployManifest } from '../manifest/schema.js';
 
 const execAsync = promisify(exec);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
 interface AngularWorkspace {
@@ -233,15 +231,10 @@ export class Builder {
     const serverDir = path.join(artifactsDir, 'server');
     await fs.ensureDir(serverDir);
 
-    const runtimeDir = path.join(serverDir, 'runtime');
-    await fs.ensureDir(runtimeDir);
-
-    const runtimeSource = await this.resolveRuntimeSource();
-
-    await fs.copy(runtimeSource, runtimeDir);
+    await this.copyRuntimePackage(serverDir);
 
     const handlerCode = `
-import { createServerHandler } from './runtime/server-handler.js';
+import { createServerHandler } from '@angular-yc/runtime';
 
 export const handler = createServerHandler({
   dir: __dirname,
@@ -277,25 +270,10 @@ export const handler = createServerHandler({
     const imageDir = path.join(artifactsDir, 'image');
     await fs.ensureDir(imageDir);
 
-    const runtimeDir = path.join(imageDir, 'runtime');
-    await fs.ensureDir(runtimeDir);
-
-    const runtimeSource = await this.resolveRuntimeSource();
-
-    for (const file of ['image-handler.js', 'image-handler.ts', 'index.js', 'index.ts']) {
-      const fullPath = path.join(runtimeSource, file);
-      if (await fs.pathExists(fullPath)) {
-        await fs.copy(fullPath, path.join(runtimeDir, file));
-      }
-    }
-
-    const responseCachePath = path.join(runtimeSource, 'response-cache');
-    if (await fs.pathExists(responseCachePath)) {
-      await fs.copy(responseCachePath, path.join(runtimeDir, 'response-cache'));
-    }
+    await this.copyRuntimePackage(imageDir);
 
     const handlerCode = `
-import { createImageHandler } from './runtime/image-handler.js';
+import { createImageHandler } from '@angular-yc/runtime';
 
 export const handler = createImageHandler({
   cacheBucket: process.env.CACHE_BUCKET,
@@ -309,36 +287,40 @@ export const handler = createImageHandler({
     await fs.remove(imageDir);
   }
 
-  private async resolveRuntimeSource(): Promise<string> {
-    const candidates = new Set<string>();
+  private async copyRuntimePackage(targetDir: string): Promise<void> {
+    const nodeModulesDest = path.join(targetDir, 'node_modules');
+    await fs.ensureDir(nodeModulesDest);
+    await this.copyPackageWithDependencies('@angular-yc/runtime', nodeModulesDest, new Set());
+  }
 
-    // Monorepo workspace runtime (development).
-    const workspaceRuntimePath = path.resolve(__dirname, '..', '..', '..', 'runtime-yc');
-    candidates.add(path.join(workspaceRuntimePath, 'dist'));
-    candidates.add(path.join(workspaceRuntimePath, 'src'));
-
-    // Bundled runtime copied into @angular-yc/cli dist during package build.
-    candidates.add(path.resolve(__dirname, '..', 'runtime-yc'));
-
-    // Installed runtime package fallback.
-    try {
-      const runtimePackageJsonPath = require.resolve('@angular-yc/runtime/package.json');
-      const runtimePackageDir = path.dirname(runtimePackageJsonPath);
-      candidates.add(path.join(runtimePackageDir, 'dist'));
-      candidates.add(path.join(runtimePackageDir, 'src'));
-    } catch {
-      // Optional fallback only.
+  private async copyPackageWithDependencies(
+    packageName: string,
+    nodeModulesDest: string,
+    copiedPackages: Set<string>,
+  ): Promise<void> {
+    if (copiedPackages.has(packageName)) {
+      return;
     }
 
-    for (const candidate of candidates) {
-      if (await fs.pathExists(candidate)) {
-        return candidate;
-      }
-    }
+    copiedPackages.add(packageName);
 
-    throw new Error(
-      `Runtime package source not found. Tried: ${Array.from(candidates).join(', ')}`,
-    );
+    const packageJsonPath = require.resolve(`${packageName}/package.json`);
+    const packageDir = path.dirname(packageJsonPath);
+    const packageJson = await fs.readJson(packageJsonPath);
+
+    await fs.copy(packageDir, path.join(nodeModulesDest, packageName), {
+      dereference: true,
+      filter: (src) => !src.includes('.cache'),
+    });
+
+    const dependencies = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.optionalDependencies || {}),
+    };
+
+    for (const dependency of Object.keys(dependencies)) {
+      await this.copyPackageWithDependencies(dependency, nodeModulesDest, copiedPackages);
+    }
   }
 
   private async copyStaticAssets(
