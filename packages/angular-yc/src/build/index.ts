@@ -313,14 +313,34 @@ export const handler = createImageHandler({
       filter: (src) => !src.includes('.cache'),
     });
 
-    const dependencies = {
-      ...(packageJson.dependencies || {}),
-      ...(packageJson.optionalDependencies || {}),
-    };
-
-    for (const dependency of Object.keys(dependencies)) {
+    const dependencies = Object.keys(packageJson.dependencies || {});
+    for (const dependency of dependencies) {
       await this.copyPackageWithDependencies(dependency, nodeModulesDest, copiedPackages);
     }
+
+    const optionalDependencies = Object.keys(packageJson.optionalDependencies || {});
+    for (const dependency of optionalDependencies) {
+      try {
+        await this.copyPackageWithDependencies(dependency, nodeModulesDest, copiedPackages);
+      } catch (error) {
+        if (this.isMissingModule(error)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  private isMissingModule(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+
+    const moduleError = error as { code?: string; message?: string };
+    return (
+      moduleError.code === 'MODULE_NOT_FOUND' ||
+      Boolean(moduleError.message?.includes('Cannot find module'))
+    );
   }
 
   private async resolvePackageJsonPath(packageName: string): Promise<string> {
