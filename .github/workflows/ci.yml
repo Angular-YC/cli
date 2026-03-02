@@ -6,7 +6,6 @@ on:
       - '**'
       - '!main'
 
-
 env:
   NODE_VERSION: 22
 
