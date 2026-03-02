@@ -20,6 +20,7 @@ export interface TerraformRunOptions {
 
 export interface TerraformApplyOptions {
   targets?: string[];
+  replace?: string[];
   autoApprove?: boolean;
   env?: NodeJS.ProcessEnv;
 }
@@ -223,6 +224,10 @@ export class TerraformRunner {
 
     for (const target of options.targets || []) {
       args.push(`-target=${target}`);
+    }
+
+    for (const replaceTarget of options.replace || []) {
+      args.push(`-replace=${replaceTarget}`);
     }
 
     await this.run(args, { env: options.env });

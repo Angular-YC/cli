@@ -164,6 +164,57 @@ function buildBackendInput(options: {
   };
 }
 
+function extractMissingLatestFunctionTargets(message: string): string[] {
+  if (!/tag\s+\\?\$latest\s+not\s+found/i.test(message)) {
+    return [];
+  }
+
+  const targets = new Set<string>();
+  const resourceMatches = message.matchAll(/with\s+([a-zA-Z0-9_.[\]-]+)\s*,/g);
+  for (const match of resourceMatches) {
+    const target = match[1];
+    if (target.includes('yandex_function.')) {
+      targets.add(target);
+    }
+  }
+
+  return Array.from(targets);
+}
+
+async function applyWithMissingLatestRecovery(
+  terraform: TerraformRunner,
+  options: { autoApprove: boolean; env?: NodeJS.ProcessEnv; verbose?: boolean },
+): Promise<void> {
+  try {
+    await terraform.apply({
+      autoApprove: options.autoApprove,
+      env: options.env,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const replaceTargets = extractMissingLatestFunctionTargets(message);
+    if (replaceTargets.length === 0) {
+      throw error;
+    }
+
+    console.warn(
+      chalk.yellow(
+        `⚠️ Recovering from missing $latest function versions by replacing: ${replaceTargets.join(', ')}`,
+      ),
+    );
+
+    await terraform.apply({
+      autoApprove: options.autoApprove,
+      replace: replaceTargets,
+      env: options.env,
+    });
+
+    if (options.verbose) {
+      console.log(chalk.gray('↪️ Terraform apply retry with -replace succeeded'));
+    }
+  }
+}
+
 async function readBuildIdFromManifest(buildDir: string): Promise<string> {
   const manifestPath = path.join(buildDir, 'deploy.manifest.json');
   if (!(await fs.pathExists(manifestPath))) {
@@ -766,14 +817,17 @@ program
           applyEnv.TF_VAR_cache_bucket_name = explicitCacheBucket;
         }
 
-        await terraform.apply({
-          autoApprove:
-            firstDefined(
-              cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
-              getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
-              getConfigBoolean(mergedConfig, 'autoApprove'),
-            ) || false,
+        const autoApprove =
+          firstDefined(
+            cliOptionValue(command, 'autoApprove', options.autoApprove as boolean),
+            getEnvBoolean(env, 'AYC_AUTO_APPROVE'),
+            getConfigBoolean(mergedConfig, 'autoApprove'),
+          ) || false;
+
+        await applyWithMissingLatestRecovery(terraform, {
+          autoApprove,
           env: applyEnv,
+          verbose: options.verbose,
         });
 
         console.log(chalk.green('✅ Deploy complete'));
