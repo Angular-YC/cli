@@ -58,6 +58,7 @@ resource "yandex_storage_bucket" "assets" {
   count = local.use_external_assets_bucket ? 0 : 1
 
   bucket = "${local.prefix}-assets-${random_id.bucket_suffix.hex}"
+  force_destroy = true
 
   # Encryption - Yandex Object Storage encrypts all data at rest by default
   # No need to specify encryption configuration as it's always enabled
@@ -99,6 +100,7 @@ resource "yandex_storage_bucket" "cache" {
   count = var.enable_response_cache && !local.use_external_cache_bucket ? 1 : 0
 
   bucket = "${local.prefix}-cache-${random_id.bucket_suffix.hex}"
+  force_destroy = true
 
   # Encryption - Yandex Object Storage encrypts all data at rest by default
   # No need to specify encryption configuration as it's always enabled
