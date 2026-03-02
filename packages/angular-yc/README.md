@@ -23,7 +23,6 @@ Example (env vars):
 ```bash
 export AYC_PROJECT=.
 export AYC_PROJECT_NAME=studio
-export AYC_TERRAFORM_DIR=./infra/yandex
 export AYC_STATE_BUCKET=pchat-terraform
 export AYC_STATE_KEY=studio/terraform.tfstate
 export AYC_REGION=ru-central1
@@ -44,3 +43,4 @@ angular-yc deploy --config ./angular-yc-cfg.json --auto-approve
 
 By default, `deploy` uses `assets_bucket`/`cache_bucket` from Terraform outputs created during `bootstrap`.
 Use `--bucket`/`--cache-bucket` only when you need explicit overrides.
+Terraform root configuration is embedded in the CLI package and generated automatically at runtime.

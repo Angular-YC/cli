@@ -51,7 +51,7 @@ You can also pass a custom file with `--config <path>`.
 
 Common env vars:
 
-- `AYC_PROJECT`, `AYC_PROJECT_NAME`, `AYC_OUTPUT`, `AYC_TERRAFORM_DIR`
+- `AYC_PROJECT`, `AYC_PROJECT_NAME`, `AYC_OUTPUT`
 - `AYC_STATE_BUCKET`, `AYC_STATE_KEY`, `AYC_STATE_REGION`, `AYC_STATE_ENDPOINT`
 - `AYC_STATE_ACCESS_KEY`, `AYC_STATE_SECRET_KEY`
 - `AYC_PREFIX`, `AYC_REGION`, `AYC_ENDPOINT`
@@ -65,7 +65,6 @@ Example with environment variables:
 export AYC_PROJECT=.
 export AYC_PROJECT_NAME=studio
 export AYC_OUTPUT=./build
-export AYC_TERRAFORM_DIR=./infra/yandex
 export AYC_STATE_BUCKET=pchat-terraform
 export AYC_STATE_KEY=studio/terraform.tfstate
 export AYC_REGION=ru-central1
@@ -84,7 +83,6 @@ Config file example (`angular-yc-cfg.json`):
   "project": ".",
   "projectName": "studio",
   "output": "./build",
-  "terraformDir": "./infra/yandex",
   "stateBucket": "pchat-terraform",
   "stateKey": "studio/terraform.tfstate",
   "appName": "studio",
@@ -106,3 +104,4 @@ angular-yc deploy --config ./angular-yc-cfg.json --auto-approve
 
 By default, `deploy` reads `assets_bucket`/`cache_bucket` from Terraform outputs produced during `bootstrap`.
 Use `--bucket`/`--cache-bucket` only for explicit overrides.
+Terraform files are embedded inside `@angular-yc/cli`; no project-local `infra/yandex` directory is required.
