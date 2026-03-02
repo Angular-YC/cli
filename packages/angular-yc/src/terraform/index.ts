@@ -41,6 +41,17 @@ export interface TerraformBackendInput {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TERRAFORM_TEMPLATE_DIR = path.join(__dirname, 'project');
+const LEGACY_APP_MODULE_PREFIX = 'module.angular_app.';
+const LEGACY_SECURITY_PREFIX = `${LEGACY_APP_MODULE_PREFIX}module.security.`;
+const REMOVED_SECURITY_SUFFIX_PREFIXES = [
+  'random_password.storage_access_key',
+  'random_password.storage_secret_key',
+  'yandex_lockbox_secret.storage_keys',
+  'yandex_lockbox_secret_version.storage_keys',
+  'yandex_iam_service_account_static_access_key.storage',
+  'yandex_lockbox_secret.storage_sa_keys',
+  'yandex_lockbox_secret_version.storage_sa_keys',
+];
 
 export function resolveBackendConfig(
   input: TerraformBackendInput,
@@ -110,6 +121,74 @@ export async function cleanupTerraformProject(terraformDir: string): Promise<voi
   await fs.remove(terraformDir);
 }
 
+function mapLegacyAddress(address: string): string | undefined {
+  if (address.startsWith(LEGACY_SECURITY_PREFIX)) {
+    const suffix = address.slice(LEGACY_SECURITY_PREFIX.length);
+
+    if (suffix.startsWith('data.')) {
+      return undefined;
+    }
+
+    if (
+      REMOVED_SECURITY_SUFFIX_PREFIXES.some(
+        (prefix) => suffix === prefix || suffix.startsWith(`${prefix}[`),
+      )
+    ) {
+      return undefined;
+    }
+
+    return `module.security.${suffix}`;
+  }
+
+  if (!address.startsWith(LEGACY_APP_MODULE_PREFIX)) {
+    return undefined;
+  }
+
+  const suffix = address.slice(LEGACY_APP_MODULE_PREFIX.length);
+  if (suffix.startsWith('data.')) {
+    return undefined;
+  }
+
+  return suffix;
+}
+
+export async function migrateLegacyModuleState(options: {
+  runner: TerraformRunner;
+  env?: NodeJS.ProcessEnv;
+  verbose?: boolean;
+}): Promise<void> {
+  const stateAddresses = await options.runner.listState(options.env);
+  if (!stateAddresses.some((address) => address.startsWith(LEGACY_APP_MODULE_PREFIX))) {
+    return;
+  }
+
+  const knownAddresses = new Set(stateAddresses);
+  const moves: Array<{ from: string; to: string }> = [];
+
+  for (const from of stateAddresses) {
+    const to = mapLegacyAddress(from);
+    if (!to || knownAddresses.has(to)) {
+      continue;
+    }
+
+    moves.push({ from, to });
+  }
+
+  if (moves.length === 0) {
+    return;
+  }
+
+  for (const move of moves) {
+    await options.runner.moveState(move.from, move.to, options.env);
+    knownAddresses.delete(move.from);
+    knownAddresses.add(move.to);
+
+    if (options.verbose) {
+      console.log(`↪️  Migrated terraform state: ${move.from} -> ${move.to}`);
+    }
+  }
+}
+
 export class TerraformRunner {
   constructor(
     private readonly terraformDir: string,
@@ -171,6 +250,38 @@ export class TerraformRunner {
       }
       throw error;
     }
+  }
+
+  async listState(env?: NodeJS.ProcessEnv): Promise<string[]> {
+    try {
+      const { stdout } = await this.run(['state', 'list'], {
+        captureOutput: true,
+        env,
+      });
+
+      return stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes('No state file was found') ||
+        message.includes('state file either has no resources')
+      ) {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  async moveState(from: string, to: string, env?: NodeJS.ProcessEnv): Promise<void> {
+    if (from === to) {
+      return;
+    }
+
+    await this.run(['state', 'mv', from, to], { env });
   }
 
   private async run(

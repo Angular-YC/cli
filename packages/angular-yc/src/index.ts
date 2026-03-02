@@ -11,6 +11,7 @@ import { Uploader } from './upload/index.js';
 import {
   cleanupTerraformProject,
   extractOutputString,
+  migrateLegacyModuleState,
   prepareTerraformProject,
   resolveBackendConfig,
   TerraformRunner,
@@ -357,6 +358,10 @@ program
         });
 
         await terraform.init(backend);
+        await migrateLegacyModuleState({
+          runner: terraform,
+          verbose: options.verbose,
+        });
 
         const targets = ['yandex_storage_bucket.assets'];
         if (options.cacheBucket) {
@@ -620,6 +625,10 @@ program
           },
         );
         await terraform.init(backend || undefined);
+        await migrateLegacyModuleState({
+          runner: terraform,
+          verbose: options.verbose,
+        });
 
         const manifest = await builder.build({
           projectPath,
@@ -644,10 +653,18 @@ program
         });
 
         const outputs = await terraform.readOutputs();
+        const explicitAssetsBucket = firstDefined(
+          cliOptionValue(command, 'bucket', options.bucket as string | undefined),
+          getEnvString(env, 'AYC_BUCKET'),
+          getConfigString(mergedConfig, 'bucket'),
+        );
+        const explicitCacheBucket = firstDefined(
+          cliOptionValue(command, 'cacheBucket', options.cacheBucket as string | undefined),
+          getEnvString(env, 'AYC_CACHE_BUCKET'),
+          getConfigString(mergedConfig, 'cacheBucket'),
+        );
 
-        const assetsBucket =
-          firstDefined(cliOptionValue(command, 'bucket', options.bucket as string | undefined)) ||
-          extractOutputString(outputs, 'assets_bucket');
+        const assetsBucket = explicitAssetsBucket || extractOutputString(outputs, 'assets_bucket');
 
         if (!assetsBucket) {
           throw new Error(
@@ -655,10 +672,7 @@ program
           );
         }
 
-        const cacheBucket =
-          firstDefined(
-            cliOptionValue(command, 'cacheBucket', options.cacheBucket as string | undefined),
-          ) || extractOutputString(outputs, 'cache_bucket');
+        const cacheBucket = explicitCacheBucket || extractOutputString(outputs, 'cache_bucket');
         const prefix =
           firstDefined(
             cliOptionValue(command, 'prefix', options.prefix as string | undefined),
@@ -743,10 +757,12 @@ program
           ...terraformVarEnv,
           TF_VAR_manifest_path: path.join(outputDir, 'deploy.manifest.json'),
           TF_VAR_build_dir: outputDir,
-          TF_VAR_assets_bucket_name: assetsBucket,
         };
-        if (cacheBucket) {
-          applyEnv.TF_VAR_cache_bucket_name = cacheBucket;
+        if (explicitAssetsBucket) {
+          applyEnv.TF_VAR_assets_bucket_name = explicitAssetsBucket;
+        }
+        if (explicitCacheBucket) {
+          applyEnv.TF_VAR_cache_bucket_name = explicitCacheBucket;
         }
 
         await terraform.apply({

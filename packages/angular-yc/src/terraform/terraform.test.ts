@@ -1,10 +1,12 @@
 import fs from 'fs-extra';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   cleanupTerraformProject,
   extractOutputString,
+  migrateLegacyModuleState,
   prepareTerraformProject,
   resolveBackendConfig,
+  TerraformRunner,
 } from './index.js';
 
 describe('resolveBackendConfig', () => {
@@ -94,5 +96,49 @@ describe('prepareTerraformProject', () => {
     } finally {
       await cleanupTerraformProject(terraformDir);
     }
+  });
+});
+
+describe('migrateLegacyModuleState', () => {
+  it('moves known legacy module addresses to current addresses', async () => {
+    const moves: Array<[string, string]> = [];
+    const runner = {
+      listState: vi
+        .fn()
+        .mockResolvedValue([
+          'module.angular_app.yandex_iam_service_account.functions',
+          'module.angular_app.module.security.yandex_iam_service_account.api_gateway',
+          'module.angular_app.module.security.random_password.storage_access_key',
+          'yandex_storage_bucket.assets[0]',
+          'module.angular_app.yandex_storage_bucket.assets[0]',
+        ]),
+      moveState: vi.fn(async (from: string, to: string) => {
+        moves.push([from, to]);
+      }),
+    } as unknown as TerraformRunner;
+
+    await migrateLegacyModuleState({ runner });
+
+    expect(moves).toEqual([
+      [
+        'module.angular_app.yandex_iam_service_account.functions',
+        'yandex_iam_service_account.functions',
+      ],
+      [
+        'module.angular_app.module.security.yandex_iam_service_account.api_gateway',
+        'module.security.yandex_iam_service_account.api_gateway',
+      ],
+    ]);
+  });
+
+  it('does nothing when state has no legacy module addresses', async () => {
+    const runner = {
+      listState: vi.fn().mockResolvedValue(['yandex_iam_service_account.functions']),
+      moveState: vi.fn(),
+    } as unknown as TerraformRunner;
+
+    await migrateLegacyModuleState({ runner });
+
+    expect(runner.moveState).not.toHaveBeenCalled();
   });
 });
