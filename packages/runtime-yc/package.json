@@ -10,7 +10,7 @@
     "directory": "packages/runtime-yc"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://registry.npmjs.org",
     "access": "public"
   },
   "type": "module",
