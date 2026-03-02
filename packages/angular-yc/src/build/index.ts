@@ -2,7 +2,6 @@ import fs from 'fs-extra';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import archiver from 'archiver';
 import chalk from 'chalk';
@@ -11,7 +10,6 @@ import { Analyzer } from '../analyze/index.js';
 import { createDefaultManifest, DeployManifest } from '../manifest/schema.js';
 
 const execAsync = promisify(exec);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
 interface AngularWorkspace {
