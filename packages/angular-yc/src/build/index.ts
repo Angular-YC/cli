@@ -3,6 +3,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import archiver from 'archiver';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -11,6 +12,7 @@ import { createDefaultManifest, DeployManifest } from '../manifest/schema.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 interface AngularWorkspace {
   defaultProject?: string;
@@ -234,14 +236,7 @@ export class Builder {
     const runtimeDir = path.join(serverDir, 'runtime');
     await fs.ensureDir(runtimeDir);
 
-    const runtimePackagePath = path.resolve(__dirname, '..', '..', '..', 'runtime-yc');
-    const runtimeSrcPath = path.join(runtimePackagePath, 'src');
-    const runtimeDistPath = path.join(runtimePackagePath, 'dist');
-    const runtimeSource = (await fs.pathExists(runtimeDistPath)) ? runtimeDistPath : runtimeSrcPath;
-
-    if (!(await fs.pathExists(runtimeSource))) {
-      throw new Error(`Runtime package source not found: ${runtimeSource}`);
-    }
+    const runtimeSource = await this.resolveRuntimeSource();
 
     await fs.copy(runtimeSource, runtimeDir);
 
@@ -285,14 +280,7 @@ export const handler = createServerHandler({
     const runtimeDir = path.join(imageDir, 'runtime');
     await fs.ensureDir(runtimeDir);
 
-    const runtimePackagePath = path.resolve(__dirname, '..', '..', '..', 'runtime-yc');
-    const runtimeSrcPath = path.join(runtimePackagePath, 'src');
-    const runtimeDistPath = path.join(runtimePackagePath, 'dist');
-    const runtimeSource = (await fs.pathExists(runtimeDistPath)) ? runtimeDistPath : runtimeSrcPath;
-
-    if (!(await fs.pathExists(runtimeSource))) {
-      throw new Error(`Runtime package source not found: ${runtimeSource}`);
-    }
+    const runtimeSource = await this.resolveRuntimeSource();
 
     for (const file of ['image-handler.js', 'image-handler.ts', 'index.js', 'index.ts']) {
       const fullPath = path.join(runtimeSource, file);
@@ -319,6 +307,38 @@ export const handler = createImageHandler({
 
     await this.createZipArchive(imageDir, path.join(artifactsDir, 'image.zip'));
     await fs.remove(imageDir);
+  }
+
+  private async resolveRuntimeSource(): Promise<string> {
+    const candidates = new Set<string>();
+
+    // Monorepo workspace runtime (development).
+    const workspaceRuntimePath = path.resolve(__dirname, '..', '..', '..', 'runtime-yc');
+    candidates.add(path.join(workspaceRuntimePath, 'dist'));
+    candidates.add(path.join(workspaceRuntimePath, 'src'));
+
+    // Bundled runtime copied into @angular-yc/cli dist during package build.
+    candidates.add(path.resolve(__dirname, '..', 'runtime-yc'));
+
+    // Installed runtime package fallback.
+    try {
+      const runtimePackageJsonPath = require.resolve('@angular-yc/runtime/package.json');
+      const runtimePackageDir = path.dirname(runtimePackageJsonPath);
+      candidates.add(path.join(runtimePackageDir, 'dist'));
+      candidates.add(path.join(runtimePackageDir, 'src'));
+    } catch {
+      // Optional fallback only.
+    }
+
+    for (const candidate of candidates) {
+      if (await fs.pathExists(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new Error(
+      `Runtime package source not found. Tried: ${Array.from(candidates).join(', ')}`,
+    );
   }
 
   private async copyStaticAssets(
