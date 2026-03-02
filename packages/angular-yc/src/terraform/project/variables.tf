@@ -76,6 +76,12 @@ variable "build_dir" {
   default     = ""
 }
 
+variable "artifact_prefix" {
+  description = "Object Storage key prefix for uploaded artifacts (defaults to manifest buildId)"
+  type        = string
+  default     = ""
+}
+
 variable "server_zip_path" {
   description = "Path to server function zip (optional, uses manifest path if not set)"
   type        = string
