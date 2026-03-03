@@ -257,11 +257,7 @@ export const handler = createServerHandler({
       await fs.copy(outputs.browserOutput, path.join(serverDir, 'browser'));
     }
 
-    const packageJsonPath = path.join(projectPath, 'package.json');
-    if (await fs.pathExists(packageJsonPath)) {
-      await fs.copy(packageJsonPath, path.join(serverDir, 'package.json'));
-      await this.copyDependencies(projectPath, serverDir);
-    }
+    await this.copyDependencies(projectPath, serverDir);
 
     await this.createZipArchive(serverDir, path.join(artifactsDir, 'server.zip'));
     await fs.remove(serverDir);
