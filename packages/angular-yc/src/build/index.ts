@@ -297,6 +297,7 @@ export const handler = createImageHandler({
     packageName: string,
     nodeModulesDest: string,
     copiedPackages: Set<string>,
+    resolveFromDir?: string,
   ): Promise<void> {
     if (copiedPackages.has(packageName)) {
       return;
@@ -304,7 +305,7 @@ export const handler = createImageHandler({
 
     copiedPackages.add(packageName);
 
-    const packageJsonPath = await this.resolvePackageJsonPath(packageName);
+    const packageJsonPath = await this.resolvePackageJsonPath(packageName, resolveFromDir);
     const packageDir = path.dirname(packageJsonPath);
     const packageJson = await fs.readJson(packageJsonPath);
 
@@ -315,13 +316,23 @@ export const handler = createImageHandler({
 
     const dependencies = Object.keys(packageJson.dependencies || {});
     for (const dependency of dependencies) {
-      await this.copyPackageWithDependencies(dependency, nodeModulesDest, copiedPackages);
+      await this.copyPackageWithDependencies(
+        dependency,
+        nodeModulesDest,
+        copiedPackages,
+        packageDir,
+      );
     }
 
     const optionalDependencies = Object.keys(packageJson.optionalDependencies || {});
     for (const dependency of optionalDependencies) {
       try {
-        await this.copyPackageWithDependencies(dependency, nodeModulesDest, copiedPackages);
+        await this.copyPackageWithDependencies(
+          dependency,
+          nodeModulesDest,
+          copiedPackages,
+          packageDir,
+        );
       } catch (error) {
         if (this.isMissingModule(error)) {
           continue;
@@ -343,11 +354,24 @@ export const handler = createImageHandler({
     );
   }
 
-  private async resolvePackageJsonPath(packageName: string): Promise<string> {
+  private async resolvePackageJsonPath(
+    packageName: string,
+    resolveFromDir?: string,
+  ): Promise<string> {
+    const resolveOptions = resolveFromDir ? { paths: [resolveFromDir] } : undefined;
+
     try {
-      return require.resolve(`${packageName}/package.json`);
+      return require.resolve(`${packageName}/package.json`, resolveOptions);
     } catch {
-      const entryPath = require.resolve(packageName);
+      const locatedPackageJson = await this.findPackageJsonByNodeModulesLookup(
+        packageName,
+        resolveFromDir,
+      );
+      if (locatedPackageJson) {
+        return locatedPackageJson;
+      }
+
+      const entryPath = require.resolve(packageName, resolveOptions);
       const packageRoot = await this.findPackageRootFromEntry(entryPath, packageName);
       if (!packageRoot) {
         throw new Error(
@@ -356,6 +380,38 @@ export const handler = createImageHandler({
       }
       return path.join(packageRoot, 'package.json');
     }
+  }
+
+  private async findPackageJsonByNodeModulesLookup(
+    packageName: string,
+    resolveFromDir?: string,
+  ): Promise<string | undefined> {
+    if (!resolveFromDir) {
+      return undefined;
+    }
+
+    const packageParts = packageName.split('/');
+    let currentDir = path.resolve(resolveFromDir);
+    const filesystemRoot = path.parse(currentDir).root;
+
+    while (true) {
+      const candidatePath = path.join(currentDir, 'node_modules', ...packageParts, 'package.json');
+      if (await fs.pathExists(candidatePath)) {
+        return candidatePath;
+      }
+
+      if (currentDir === filesystemRoot) {
+        break;
+      }
+
+      const parentDir = path.dirname(currentDir);
+      if (parentDir === currentDir) {
+        break;
+      }
+      currentDir = parentDir;
+    }
+
+    return undefined;
   }
 
   private async findPackageRootFromEntry(
