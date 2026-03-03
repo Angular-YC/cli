@@ -164,13 +164,19 @@ function buildBackendInput(options: {
   };
 }
 
+function stripAnsi(input: string): string {
+  return input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+}
+
 function extractMissingLatestFunctionTargets(message: string): string[] {
-  if (!/tag\s+\\?\$latest\s+not\s+found/i.test(message)) {
+  const normalized = stripAnsi(message);
+
+  if (!/tag\s+\\?\$latest\s+not\s+found/i.test(normalized)) {
     return [];
   }
 
   const targets = new Set<string>();
-  const resourceMatches = message.matchAll(/with\s+([a-zA-Z0-9_.[\]-]+)\s*,/g);
+  const resourceMatches = normalized.matchAll(/with\s+([a-zA-Z0-9_.[\]-]+)\s*,/g);
   for (const match of resourceMatches) {
     const target = match[1];
     if (target.includes('yandex_function.')) {
@@ -192,7 +198,16 @@ async function applyWithMissingLatestRecovery(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const replaceTargets = extractMissingLatestFunctionTargets(message);
+    let replaceTargets = extractMissingLatestFunctionTargets(message);
+
+    if (
+      replaceTargets.length === 0 &&
+      /tag\s+\\?\$latest\s+not\s+found/i.test(stripAnsi(message))
+    ) {
+      const stateTargets = await terraform.listState(options.env);
+      replaceTargets = stateTargets.filter((target) => target.includes('yandex_function.'));
+    }
+
     if (replaceTargets.length === 0) {
       throw error;
     }
@@ -206,6 +221,7 @@ async function applyWithMissingLatestRecovery(
     await terraform.apply({
       autoApprove: options.autoApprove,
       replace: replaceTargets,
+      refresh: false,
       env: options.env,
     });
 
