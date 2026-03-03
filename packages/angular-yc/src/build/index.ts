@@ -44,6 +44,7 @@ export interface BuildOptions {
 
 export class Builder {
   private readonly analyzer: Analyzer;
+  private static readonly SERVER_RUNTIME_EXCLUDED_PACKAGES = new Set(['sharp']);
 
   constructor() {
     this.analyzer = new Analyzer();
@@ -231,10 +232,10 @@ export class Builder {
     const serverDir = path.join(artifactsDir, 'server');
     await fs.ensureDir(serverDir);
 
-    await this.copyRuntimePackage(serverDir);
+    await this.copyRuntimePackage(serverDir, { includeImageDependencies: false });
 
     const handlerCode = `
-import { createServerHandler } from '@angular-yc/runtime';
+import { createServerHandler } from '@angular-yc/runtime/dist/server-handler.js';
 
 export const handler = createServerHandler({
   dir: __dirname,
@@ -270,10 +271,10 @@ export const handler = createServerHandler({
     const imageDir = path.join(artifactsDir, 'image');
     await fs.ensureDir(imageDir);
 
-    await this.copyRuntimePackage(imageDir);
+    await this.copyRuntimePackage(imageDir, { includeImageDependencies: true });
 
     const handlerCode = `
-import { createImageHandler } from '@angular-yc/runtime';
+import { createImageHandler } from '@angular-yc/runtime/dist/image-handler.js';
 
 export const handler = createImageHandler({
   cacheBucket: process.env.CACHE_BUCKET,
@@ -287,10 +288,19 @@ export const handler = createImageHandler({
     await fs.remove(imageDir);
   }
 
-  private async copyRuntimePackage(targetDir: string): Promise<void> {
+  private async copyRuntimePackage(
+    targetDir: string,
+    options: { includeImageDependencies: boolean },
+  ): Promise<void> {
     const nodeModulesDest = path.join(targetDir, 'node_modules');
     await fs.ensureDir(nodeModulesDest);
-    await this.copyPackageWithDependencies('@angular-yc/runtime', nodeModulesDest, new Set());
+    await this.copyPackageWithDependencies(
+      '@angular-yc/runtime',
+      nodeModulesDest,
+      new Set(),
+      undefined,
+      options.includeImageDependencies ? undefined : Builder.SERVER_RUNTIME_EXCLUDED_PACKAGES,
+    );
   }
 
   private async copyPackageWithDependencies(
@@ -298,7 +308,12 @@ export const handler = createImageHandler({
     nodeModulesDest: string,
     copiedPackages: Set<string>,
     resolveFromDir?: string,
+    excludedPackages?: Set<string>,
   ): Promise<void> {
+    if (this.isExcludedPackage(packageName, excludedPackages)) {
+      return;
+    }
+
     if (copiedPackages.has(packageName)) {
       return;
     }
@@ -321,6 +336,7 @@ export const handler = createImageHandler({
         nodeModulesDest,
         copiedPackages,
         packageDir,
+        excludedPackages,
       );
     }
 
@@ -332,6 +348,7 @@ export const handler = createImageHandler({
           nodeModulesDest,
           copiedPackages,
           packageDir,
+          excludedPackages,
         );
       } catch (error) {
         if (this.isMissingModule(error)) {
@@ -340,6 +357,21 @@ export const handler = createImageHandler({
         throw error;
       }
     }
+  }
+
+  private isExcludedPackage(
+    packageName: string,
+    excludedPackages?: Set<string>,
+  ): boolean {
+    if (!excludedPackages) {
+      return false;
+    }
+
+    if (excludedPackages.has(packageName)) {
+      return true;
+    }
+
+    return packageName.startsWith('@img/');
   }
 
   private isMissingModule(error: unknown): boolean {
