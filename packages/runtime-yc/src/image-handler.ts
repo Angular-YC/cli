@@ -1,6 +1,5 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import sharp from 'sharp';
 import crypto from 'crypto';
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from './server-handler.js';
 
@@ -27,6 +26,7 @@ const JPEG = 'image/jpeg';
 const GIF = 'image/gif';
 const SVG = 'image/svg+xml';
 const ICO = 'image/x-icon';
+let sharpFactory: ((input: Buffer) => any) | undefined;
 
 export function createImageHandler(options: ImageHandlerOptions = {}) {
   const {
@@ -252,6 +252,7 @@ async function processImage(
     format: string;
   },
 ): Promise<{ buffer: Buffer; format: string }> {
+  const sharp = await loadSharp();
   let pipeline = sharp(input);
 
   if (options.width) {
@@ -279,6 +280,28 @@ async function processImage(
 
   const buffer = await pipeline.toBuffer();
   return { buffer, format: options.format };
+}
+
+async function loadSharp(): Promise<(input: Buffer) => any> {
+  if (sharpFactory) {
+    return sharpFactory;
+  }
+
+  try {
+    const module = await import('sharp');
+    const sharpExport = module.default;
+    if (typeof sharpExport !== 'function') {
+      throw new Error('sharp default export is not a function');
+    }
+    sharpFactory = sharpExport as (input: Buffer) => any;
+    return sharpFactory;
+  } catch (error) {
+    throw new Error(
+      `Image optimization dependency "sharp" is not available: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 function detectFormat(sourceType: string, accept: string, supportedFormats: string[]): string {

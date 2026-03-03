@@ -235,7 +235,7 @@ export class Builder {
     await this.copyRuntimePackage(serverDir, { includeImageDependencies: false });
 
     const handlerCode = `
-import { createServerHandler } from '@angular-yc/runtime/dist/server-handler.js';
+import { createServerHandler } from '@angular-yc/runtime';
 
 export const handler = createServerHandler({
   dir: __dirname,
@@ -274,7 +274,7 @@ export const handler = createServerHandler({
     await this.copyRuntimePackage(imageDir, { includeImageDependencies: true });
 
     const handlerCode = `
-import { createImageHandler } from '@angular-yc/runtime/dist/image-handler.js';
+import { createImageHandler } from '@angular-yc/runtime';
 
 export const handler = createImageHandler({
   cacheBucket: process.env.CACHE_BUCKET,
