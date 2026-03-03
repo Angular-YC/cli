@@ -22,6 +22,7 @@ export interface TerraformApplyOptions {
   targets?: string[];
   replace?: string[];
   autoApprove?: boolean;
+  refresh?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -222,6 +223,10 @@ export class TerraformRunner {
       args.push('-auto-approve');
     }
 
+    if (options.refresh === false) {
+      args.push('-refresh=false');
+    }
+
     for (const target of options.targets || []) {
       args.push(`-target=${target}`);
     }
@@ -297,25 +302,39 @@ export class TerraformRunner {
     stderr: string;
   }> {
     const captureOutput = options.captureOutput ?? false;
+    const MAX_CAPTURED_OUTPUT = 256 * 1024;
 
     return new Promise((resolve, reject) => {
       const child = spawn(this.terraformBin, args, {
         cwd: this.terraformDir,
         env: { ...process.env, ...options.env },
-        stdio: captureOutput ? 'pipe' : 'inherit',
+        stdio: 'pipe',
       });
 
       let stdout = '';
       let stderr = '';
 
-      if (captureOutput) {
-        child.stdout?.on('data', (chunk: Buffer | string) => {
-          stdout += String(chunk);
-        });
-        child.stderr?.on('data', (chunk: Buffer | string) => {
-          stderr += String(chunk);
-        });
-      }
+      const appendOutput = (current: string, chunk: Buffer | string): string => {
+        const next = current + String(chunk);
+        if (next.length <= MAX_CAPTURED_OUTPUT) {
+          return next;
+        }
+        return next.slice(-MAX_CAPTURED_OUTPUT);
+      };
+
+      child.stdout?.on('data', (chunk: Buffer | string) => {
+        stdout = appendOutput(stdout, chunk);
+        if (!captureOutput) {
+          process.stdout.write(chunk);
+        }
+      });
+
+      child.stderr?.on('data', (chunk: Buffer | string) => {
+        stderr = appendOutput(stderr, chunk);
+        if (!captureOutput) {
+          process.stderr.write(chunk);
+        }
+      });
 
       child.on('error', (err: Error) => reject(err));
       child.on('close', (code: number | null) => {
