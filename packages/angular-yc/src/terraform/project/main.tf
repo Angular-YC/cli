@@ -224,6 +224,12 @@ resource "yandex_function" "server" {
   memory             = local.manifest.deployment.functions.server.memory
   execution_timeout  = local.manifest.deployment.functions.server.timeout
   service_account_id = yandex_iam_service_account.functions.id
+  depends_on = [
+    yandex_resourcemanager_folder_iam_member.functions_invoker,
+    yandex_resourcemanager_folder_iam_member.storage_viewer,
+    yandex_resourcemanager_folder_iam_member.storage_editor,
+    yandex_resourcemanager_folder_iam_member.lockbox_payload_viewer,
+  ]
 
   # Environment variables
   environment = merge(
@@ -277,6 +283,12 @@ resource "yandex_function" "image" {
   memory             = local.manifest.deployment.functions.image.memory
   execution_timeout  = local.manifest.deployment.functions.image.timeout
   service_account_id = yandex_iam_service_account.functions.id
+  depends_on = [
+    yandex_resourcemanager_folder_iam_member.functions_invoker,
+    yandex_resourcemanager_folder_iam_member.storage_viewer,
+    yandex_resourcemanager_folder_iam_member.storage_editor,
+    yandex_resourcemanager_folder_iam_member.lockbox_payload_viewer,
+  ]
 
   environment = merge(
     local.manifest.artifacts.image.env,
