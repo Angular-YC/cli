@@ -23,18 +23,6 @@ locals {
   external_cache_bucket      = trimspace(var.cache_bucket_name)
   use_external_cache_bucket  = var.enable_response_cache && local.external_cache_bucket != ""
 
-  safe_app_tag      = replace(lower(var.app_name), "/[^a-z0-9_-]/", "_")
-  safe_env_tag      = replace(lower(var.env), "/[^a-z0-9_-]/", "_")
-  safe_build_id_tag = replace(lower(local.build_id), "/[^a-z0-9_-]/", "_")
-
-  # Common tags (for yandex_function - requires set of strings)
-  common_tags = toset([
-    "app_${local.safe_app_tag}",
-    "env_${local.safe_env_tag}",
-    "build_${local.safe_build_id_tag}",
-    "managed_by_terraform"
-  ])
-
   # Common labels (for other resources - requires map of strings)
   common_labels = {
     app        = var.app_name
@@ -275,7 +263,6 @@ resource "yandex_function" "server" {
     object_name = "${local.artifact_prefix}/functions/server.zip"
   }
 
-  tags = local.common_tags
 }
 
 # Image optimization function
@@ -306,7 +293,6 @@ resource "yandex_function" "image" {
     object_name = "${local.artifact_prefix}/functions/image.zip"
   }
 
-  tags = local.common_tags
 }
 
 # ============================================================================

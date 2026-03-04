@@ -97,6 +97,18 @@ describe('prepareTerraformProject', () => {
       await cleanupTerraformProject(terraformDir);
     }
   });
+
+  it('does not attach tags to function resources to avoid functionTags quota growth', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
+      expect(mainTf).not.toContain('tags = local.common_tags');
+      expect(mainTf).not.toContain('common_tags = toset(');
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
 });
 
 describe('migrateLegacyModuleState', () => {
