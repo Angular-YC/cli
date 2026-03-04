@@ -85,7 +85,7 @@ paths:
 %{ if has_server ~}
   # Express API routes
   /api/{proxy+}:
-    any:
+    x-yc-apigateway-any-method:
       summary: API route handler
       parameters:
         - name: proxy
@@ -102,7 +102,7 @@ paths:
 
   # Catch-all for Angular SSR
   /{proxy+}:
-    any:
+    x-yc-apigateway-any-method:
       summary: Server-side rendered pages
       parameters:
         - name: proxy
@@ -119,7 +119,7 @@ paths:
 
   # Root path
   /:
-    any:
+    x-yc-apigateway-any-method:
       summary: Root path handler
       x-yc-apigateway-integration:
         type: cloud_functions
