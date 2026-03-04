@@ -187,6 +187,16 @@ function extractMissingLatestFunctionTargets(message: string): string[] {
   return Array.from(targets);
 }
 
+function isApiGatewaySpecInconsistentPlanError(message: string): boolean {
+  const normalized = stripAnsi(message);
+
+  return (
+    /Provider produced inconsistent final plan/i.test(normalized) &&
+    /yandex_api_gateway\.main/i.test(normalized) &&
+    /invalid new value for \.spec/i.test(normalized)
+  );
+}
+
 async function applyWithMissingLatestRecovery(
   terraform: TerraformRunner,
   options: { autoApprove: boolean; env?: NodeJS.ProcessEnv; verbose?: boolean },
@@ -197,7 +207,33 @@ async function applyWithMissingLatestRecovery(
       env: options.env,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    let effectiveError: unknown = error;
+    let message = error instanceof Error ? error.message : String(error);
+
+    if (isApiGatewaySpecInconsistentPlanError(message)) {
+      console.warn(
+        chalk.yellow(
+          '⚠️ Detected Yandex provider inconsistent API Gateway spec plan. Retrying terraform apply once in-place.',
+        ),
+      );
+
+      try {
+        await terraform.apply({
+          autoApprove: options.autoApprove,
+          env: options.env,
+        });
+
+        if (options.verbose) {
+          console.log(chalk.gray('↪️ Terraform apply retry after inconsistent plan succeeded'));
+        }
+
+        return;
+      } catch (retryError) {
+        effectiveError = retryError;
+        message = retryError instanceof Error ? retryError.message : String(retryError);
+      }
+    }
+
     let replaceTargets = extractMissingLatestFunctionTargets(message);
 
     if (
@@ -209,7 +245,7 @@ async function applyWithMissingLatestRecovery(
     }
 
     if (replaceTargets.length === 0) {
-      throw error;
+      throw effectiveError;
     }
 
     console.warn(
