@@ -128,6 +128,22 @@ describe('prepareTerraformProject', () => {
     }
   });
 
+  it('creates API gateway DNS record for both new and existing DNS zones', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
+      expect(mainTf).toContain(
+        'count = (var.create_dns_zone || trimspace(var.dns_zone_id) != "") ? 1 : 0',
+      );
+      expect(mainTf).toContain(
+        'zone_id = var.create_dns_zone ? yandex_dns_zone.main[0].id : var.dns_zone_id',
+      );
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
+
   it('uses x-yc-apigateway-any-method instead of unsupported OpenAPI any operations', async () => {
     const terraformDir = await prepareTerraformProject();
 
