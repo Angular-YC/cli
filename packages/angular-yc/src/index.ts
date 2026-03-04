@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { Analyzer } from './analyze/index.js';
 import { Builder } from './build/index.js';
+import { ManifestGenerator } from './manifest/index.js';
 import { Uploader } from './upload/index.js';
 import {
   cleanupTerraformProject,
