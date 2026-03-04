@@ -97,6 +97,36 @@ describe('prepareTerraformProject', () => {
       await cleanupTerraformProject(terraformDir);
     }
   });
+
+  it('does not attach tags to function resources to avoid functionTags quota growth', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
+      expect(mainTf).not.toContain('tags = local.common_tags');
+      expect(mainTf).not.toContain('common_tags = toset(');
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
+
+  it('ensures function resources wait for IAM role bindings before version creation', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
+      expect(mainTf).toContain(
+        'depends_on = [\n' +
+          '    yandex_resourcemanager_folder_iam_member.functions_invoker,\n' +
+          '    yandex_resourcemanager_folder_iam_member.storage_viewer,\n' +
+          '    yandex_resourcemanager_folder_iam_member.storage_editor,\n' +
+          '    yandex_resourcemanager_folder_iam_member.lockbox_payload_viewer,\n' +
+          '  ]',
+      );
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
 });
 
 describe('migrateLegacyModuleState', () => {

@@ -197,6 +197,19 @@ function isApiGatewaySpecInconsistentPlanError(message: string): boolean {
   );
 }
 
+function isLockboxPermissionDeniedOnFunctionVersionCreate(message: string): boolean {
+  const normalized = stripAnsi(message);
+
+  return (
+    /create version for yandex cloud function/i.test(normalized) &&
+    /lockbox:PERMISSION_DENIED/i.test(normalized)
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function applyWithMissingLatestRecovery(
   terraform: TerraformRunner,
   options: { autoApprove: boolean; env?: NodeJS.ProcessEnv; verbose?: boolean },
@@ -225,6 +238,34 @@ async function applyWithMissingLatestRecovery(
 
         if (options.verbose) {
           console.log(chalk.gray('↪️ Terraform apply retry after inconsistent plan succeeded'));
+        }
+
+        return;
+      } catch (retryError) {
+        effectiveError = retryError;
+        message = retryError instanceof Error ? retryError.message : String(retryError);
+      }
+    }
+
+    if (isLockboxPermissionDeniedOnFunctionVersionCreate(message)) {
+      console.warn(
+        chalk.yellow(
+          '⚠️ Detected Lockbox permission propagation delay during function version create. Retrying terraform apply once in-place.',
+        ),
+      );
+
+      await sleep(8000);
+
+      try {
+        await terraform.apply({
+          autoApprove: options.autoApprove,
+          env: options.env,
+        });
+
+        if (options.verbose) {
+          console.log(
+            chalk.gray('↪️ Terraform apply retry after lockbox permission delay succeeded'),
+          );
         }
 
         return;
