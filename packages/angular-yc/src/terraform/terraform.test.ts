@@ -127,6 +127,23 @@ describe('prepareTerraformProject', () => {
       await cleanupTerraformProject(terraformDir);
     }
   });
+
+  it('uses x-yc-apigateway-any-method instead of unsupported OpenAPI any operations', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const openapiTemplate = await fs.readFile(
+        `${terraformDir}/templates/openapi.yaml.tpl`,
+        'utf8',
+      );
+      expect(openapiTemplate).toContain('/api/{proxy+}:\n    x-yc-apigateway-any-method:');
+      expect(openapiTemplate).toContain('/{proxy+}:\n    x-yc-apigateway-any-method:');
+      expect(openapiTemplate).toContain('/:\n    x-yc-apigateway-any-method:');
+      expect(openapiTemplate).not.toContain('\n    any:\n');
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
 });
 
 describe('migrateLegacyModuleState', () => {
