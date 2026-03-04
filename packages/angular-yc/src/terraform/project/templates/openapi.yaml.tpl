@@ -77,7 +77,6 @@ paths:
       x-yc-apigateway-integration:
         type: cloud_functions
         function_id: ${image_function_id}
-        function_version_id: ${image_version_id}
         service_account_id: ${service_account_id}
         payload_format_version: "1.0"
 %{ endif ~}
@@ -96,7 +95,6 @@ paths:
       x-yc-apigateway-integration:
         type: cloud_functions
         function_id: ${server_function_id}
-        function_version_id: ${server_version_id}
         service_account_id: ${service_account_id}
         payload_format_version: "1.0"
 
@@ -113,7 +111,6 @@ paths:
       x-yc-apigateway-integration:
         type: cloud_functions
         function_id: ${server_function_id}
-        function_version_id: ${server_version_id}
         service_account_id: ${service_account_id}
         payload_format_version: "1.0"
 
@@ -124,7 +121,6 @@ paths:
       x-yc-apigateway-integration:
         type: cloud_functions
         function_id: ${server_function_id}
-        function_version_id: ${server_version_id}
         service_account_id: ${service_account_id}
         payload_format_version: "1.0"
 %{ endif ~}
