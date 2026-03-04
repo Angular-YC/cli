@@ -140,6 +140,24 @@ describe('prepareTerraformProject', () => {
       expect(openapiTemplate).toContain('/{proxy+}:\n    x-yc-apigateway-any-method:');
       expect(openapiTemplate).toContain('/:\n    x-yc-apigateway-any-method:');
       expect(openapiTemplate).not.toContain('\n    any:\n');
+      expect(openapiTemplate).not.toContain('function_version_id:');
+    } finally {
+      await cleanupTerraformProject(terraformDir);
+    }
+  });
+
+  it('pins API gateway ordering and ignores spec drift from same-run function version churn', async () => {
+    const terraformDir = await prepareTerraformProject();
+
+    try {
+      const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
+      expect(mainTf).toContain(
+        'depends_on = [\n' +
+          '    yandex_function.server,\n' +
+          '    yandex_function.image,\n' +
+          '  ]',
+      );
+      expect(mainTf).toContain('lifecycle {\n    ignore_changes = [spec]\n  }');
     } finally {
       await cleanupTerraformProject(terraformDir);
     }
