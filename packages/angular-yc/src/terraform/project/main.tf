@@ -318,9 +318,7 @@ locals {
     assets_bucket      = local.assets_bucket
     build_id           = local.build_id
     server_function_id = local.manifest.capabilities.rendering.needsServer ? yandex_function.server[0].id : ""
-    server_version_id  = local.manifest.capabilities.rendering.needsServer ? yandex_function.server[0].version : ""
     image_function_id  = local.manifest.capabilities.assets.needsImage ? yandex_function.image[0].id : ""
-    image_version_id   = local.manifest.capabilities.assets.needsImage ? yandex_function.image[0].version : ""
     service_account_id = yandex_iam_service_account.functions.id
     has_server         = local.manifest.capabilities.rendering.needsServer
     has_image          = local.manifest.capabilities.assets.needsImage
@@ -331,7 +329,16 @@ resource "yandex_api_gateway" "main" {
   name        = "${local.prefix}-api-gateway"
   description = "API Gateway for Angular application"
 
+  depends_on = [
+    yandex_function.server,
+    yandex_function.image,
+  ]
+
   spec = local.openapi_spec
+
+  lifecycle {
+    ignore_changes = [spec]
+  }
 
   labels = local.common_labels
 }
