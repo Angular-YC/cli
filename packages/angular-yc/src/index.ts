@@ -263,7 +263,9 @@ async function applyWithMissingLatestRecovery(
         });
 
         if (options.verbose) {
-          console.log(chalk.gray('↪️ Terraform apply retry after lockbox permission delay succeeded'));
+          console.log(
+            chalk.gray('↪️ Terraform apply retry after lockbox permission delay succeeded'),
+          );
         }
 
         return;
