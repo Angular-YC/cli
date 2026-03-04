@@ -384,9 +384,9 @@ resource "yandex_dns_recordset" "validation" {
 
 # API Gateway custom domain
 resource "yandex_dns_recordset" "api_gateway" {
-  count = var.create_dns_zone ? 1 : 0
+  count = (var.create_dns_zone || trimspace(var.dns_zone_id) != "") ? 1 : 0
 
-  zone_id = yandex_dns_zone.main[0].id
+  zone_id = var.create_dns_zone ? yandex_dns_zone.main[0].id : var.dns_zone_id
   name    = var.domain_name
   type    = "CNAME"
   ttl     = 300
