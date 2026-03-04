@@ -16,6 +16,7 @@ locals {
   # TLS certificate mode
   external_certificate_id  = trimspace(var.certificate_id)
   use_external_certificate = local.external_certificate_id != ""
+  certificate_id           = local.use_external_certificate ? local.external_certificate_id : yandex_cm_certificate.main[0].id
 
   # Bucket mode
   external_assets_bucket     = trimspace(var.assets_bucket_name)
@@ -332,9 +333,15 @@ resource "yandex_api_gateway" "main" {
   depends_on = [
     yandex_function.server,
     yandex_function.image,
+    yandex_dns_recordset.validation,
   ]
 
   spec = local.openapi_spec
+
+  custom_domains {
+    fqdn           = var.domain_name
+    certificate_id = local.certificate_id
+  }
 
   lifecycle {
     ignore_changes = [spec]
