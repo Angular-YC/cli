@@ -164,7 +164,9 @@ function buildBackendInput(options: {
 }
 
 function stripAnsi(input: string): string {
-  return input.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+  const escape = String.fromCharCode(27);
+  const ansiPattern = new RegExp(`${escape}\\[[0-9;]*[A-Za-z]`, 'g');
+  return input.replace(ansiPattern, '');
 }
 
 function extractMissingLatestFunctionTargets(message: string): string[] {
