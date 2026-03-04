@@ -26,7 +26,7 @@
     "build": "tsc && cp src/compat/compat.yml dist/compat/compat.yml && cp -r src/terraform/project dist/terraform/project && chmod +x dist/index.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "test": "vitest run --passWithNoTests",
+    "test": "pnpm --filter @angular-yc/runtime build && vitest run --passWithNoTests",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "lint": "eslint 'src/**/*.ts' --max-warnings 0 || true",
