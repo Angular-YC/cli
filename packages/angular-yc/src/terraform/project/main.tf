@@ -394,7 +394,7 @@ resource "yandex_dns_recordset" "api_gateway" {
   count = (var.create_dns_zone || trimspace(var.dns_zone_id) != "") ? 1 : 0
 
   zone_id = var.create_dns_zone ? yandex_dns_zone.main[0].id : var.dns_zone_id
-  name    = var.domain_name
+  name    = "${trimsuffix(var.domain_name, ".")}."
   type    = "CNAME"
   ttl     = 300
   data    = [yandex_api_gateway.main.domain]
