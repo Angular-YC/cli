@@ -240,6 +240,12 @@ import { createServerHandler } from '${runtimeEntryPath.replace(/\\/g, '/')}';
 export const handler = createServerHandler({
   dir: __dirname,
   trustProxy: true,
+  serverModuleCandidates: [
+    'server/server.mjs',
+    'server/server.js',
+    'server/main.server.mjs',
+    'server/main.server.js',
+  ],
   responseCache: {
     enabled: ${capabilities.responseCache.enabled ? 'true' : 'false'},
     driver: process.env.RESPONSE_CACHE_DRIVER || 'memory',

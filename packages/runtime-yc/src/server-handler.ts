@@ -121,9 +121,10 @@ export function createServerHandler(options: HandlerOptions) {
 
     const candidate =
       (handlerExportName ? imported[handlerExportName] : undefined) ||
-      imported.default ||
+      imported.reqHandler ||
       imported.app ||
       imported.handler ||
+      imported.default ||
       imported.render;
 
     if (!candidate) {
