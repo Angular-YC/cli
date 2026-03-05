@@ -167,12 +167,10 @@ describe('prepareTerraformProject', () => {
 
     try {
       const mainTf = await fs.readFile(`${terraformDir}/main.tf`, 'utf8');
-      expect(mainTf).toContain(
-        'depends_on = [\n' +
-          '    yandex_function.server,\n' +
-          '    yandex_function.image,\n' +
-          '  ]',
-      );
+      expect(mainTf).toContain('depends_on = [');
+      expect(mainTf).toContain('yandex_function.server');
+      expect(mainTf).toContain('yandex_function.image');
+      expect(mainTf).toContain('yandex_dns_recordset.validation');
       expect(mainTf).toContain('lifecycle {\n    ignore_changes = [spec]\n  }');
     } finally {
       await cleanupTerraformProject(terraformDir);
