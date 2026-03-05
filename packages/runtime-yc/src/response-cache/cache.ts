@@ -39,9 +39,14 @@ interface MemoryEntry {
 export class InMemoryResponseCache implements ResponseCache {
   private readonly cache = new Map<string, MemoryEntry>();
   private readonly defaultTtlSeconds: number;
+  private readonly maxEntries: number;
+  private readonly sweepIntervalMs: number;
+  private lastSweepAt = 0;
 
-  constructor(defaultTtlSeconds = 60) {
+  constructor(defaultTtlSeconds = 60, maxEntries = 1000, sweepIntervalMs = 60_000) {
     this.defaultTtlSeconds = defaultTtlSeconds;
+    this.maxEntries = maxEntries;
+    this.sweepIntervalMs = sweepIntervalMs;
   }
 
   async get(key: string): Promise<CachedResponse | null> {
@@ -66,6 +71,9 @@ export class InMemoryResponseCache implements ResponseCache {
       tags?: string[];
     },
   ): Promise<void> {
+    this.sweepIfNeeded();
+    this.evictIfFull();
+
     const ttlMs = (options?.ttlSeconds ?? this.defaultTtlSeconds) * 1000;
     this.cache.set(key, {
       value: {
@@ -88,11 +96,43 @@ export class InMemoryResponseCache implements ResponseCache {
       }
     }
   }
+
+  private sweepIfNeeded(): void {
+    const now = Date.now();
+    if (now - this.lastSweepAt < this.sweepIntervalMs) {
+      return;
+    }
+    this.lastSweepAt = now;
+    for (const [key, entry] of this.cache) {
+      if (now > entry.expiresAt) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  private evictIfFull(): void {
+    if (this.cache.size < this.maxEntries) {
+      return;
+    }
+    const firstKey = this.cache.keys().next().value;
+    if (firstKey !== undefined) {
+      this.cache.delete(firstKey);
+    }
+  }
+}
+
+class NoOpResponseCache implements ResponseCache {
+  async get(): Promise<null> {
+    return null;
+  }
+  async set(): Promise<void> {}
+  async delete(): Promise<void> {}
+  async purgeTag(): Promise<void> {}
 }
 
 export function createResponseCache(options: ResponseCacheOptions): ResponseCache {
   if (!options.enabled) {
-    return new InMemoryResponseCache(1);
+    return new NoOpResponseCache();
   }
 
   if (options.driver === 'ydb' && options.ydb) {

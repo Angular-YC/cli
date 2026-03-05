@@ -7,6 +7,9 @@ vi.mock('fs-extra');
 vi.mock('archiver');
 vi.mock('../analyze/index.js');
 vi.mock('../compat/index.js');
+vi.mock('esbuild', () => ({
+  build: vi.fn().mockResolvedValue({}),
+}));
 vi.mock('chalk', () => ({
   default: {
     blue: (s: string) => s,
@@ -136,11 +139,11 @@ describe('Builder', () => {
 
     expect(Analyzer.prototype.analyze).toHaveBeenCalled();
     expect(fs.writeFile).toHaveBeenCalledWith(
-      expect.stringContaining('index.js'),
+      expect.stringContaining('_entry.mjs'),
       expect.stringContaining('createServerHandler'),
     );
     expect(fs.writeFile).toHaveBeenCalledWith(
-      expect.stringContaining('index.js'),
+      expect.stringContaining('_entry.mjs'),
       expect.stringContaining('createImageHandler'),
     );
     expect(fs.writeJson).toHaveBeenCalledWith(
@@ -243,7 +246,7 @@ describe('Builder', () => {
     ).rejects.toThrow('Analysis failed');
   });
 
-  it('copies runtime package files for server build', async () => {
+  it('bundles server handler with esbuild', async () => {
     const mockCapabilities = {
       angularVersion: '20.0.0',
       ssr: { enabled: true, expressAdapter: 'express-app', standaloneBundle: true },
@@ -275,13 +278,14 @@ describe('Builder', () => {
 
     await builder.build({ projectPath: mockProjectPath, outputDir: mockOutputPath, skipBuild: true });
 
-    const copyCalls = vi.mocked(fs.copy).mock.calls.map((call) => ({
-      source: call[0].toString(),
-      dest: call[1].toString(),
-    }));
-
-    expect(copyCalls.some((call) => call.dest.includes('node_modules/@angular-yc/runtime'))).toBe(
-      true,
+    const esbuild = await import('esbuild');
+    expect(esbuild.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        external: ['sharp', '@img/*'],
+      }),
     );
   });
 
