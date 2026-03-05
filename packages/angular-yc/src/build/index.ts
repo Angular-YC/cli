@@ -44,7 +44,6 @@ export interface BuildOptions {
 
 export class Builder {
   private readonly analyzer: Analyzer;
-  private static readonly SERVER_RUNTIME_EXCLUDED_PACKAGES = new Set(['sharp']);
 
   constructor() {
     this.analyzer = new Analyzer();
@@ -224,7 +223,7 @@ export class Builder {
   }
 
   private async packageServer(
-    projectPath: string,
+    _projectPath: string,
     artifactsDir: string,
     capabilities: DeployManifest['capabilities'],
     outputs: BuildOutputs,
@@ -232,10 +231,11 @@ export class Builder {
     const serverDir = path.join(artifactsDir, 'server');
     await fs.ensureDir(serverDir);
 
-    await this.copyRuntimePackage(serverDir, { includeImageDependencies: false });
+    const runtimeEntryPath = require.resolve('@angular-yc/runtime');
 
+    const tempEntryPath = path.join(serverDir, '_entry.mjs');
     const handlerCode = `
-import { createServerHandler } from '@angular-yc/runtime';
+import { createServerHandler } from '${runtimeEntryPath.replace(/\\/g, '/')}';
 
 export const handler = createServerHandler({
   dir: __dirname,
@@ -247,7 +247,10 @@ export const handler = createServerHandler({
   },
 });
 `;
-    await fs.writeFile(path.join(serverDir, 'index.js'), handlerCode.trimStart());
+    await fs.writeFile(tempEntryPath, handlerCode.trimStart());
+
+    await this.bundleWithEsbuild(tempEntryPath, path.join(serverDir, 'index.js'), ['sharp', '@img/*']);
+    await fs.remove(tempEntryPath);
 
     if (outputs.serverOutput && (await fs.pathExists(outputs.serverOutput))) {
       await fs.copy(outputs.serverOutput, path.join(serverDir, 'server'));
@@ -257,8 +260,6 @@ export const handler = createServerHandler({
       await fs.copy(outputs.browserOutput, path.join(serverDir, 'browser'));
     }
 
-    await this.copyDependencies(projectPath, serverDir);
-
     await this.createZipArchive(serverDir, path.join(artifactsDir, 'server.zip'));
     await fs.remove(serverDir);
   }
@@ -267,219 +268,70 @@ export const handler = createServerHandler({
     const imageDir = path.join(artifactsDir, 'image');
     await fs.ensureDir(imageDir);
 
-    await this.copyRuntimePackage(imageDir, { includeImageDependencies: true });
+    const runtimeEntryPath = require.resolve('@angular-yc/runtime');
 
+    const tempEntryPath = path.join(imageDir, '_entry.mjs');
     const handlerCode = `
-import { createImageHandler } from '@angular-yc/runtime';
+import { createImageHandler } from '${runtimeEntryPath.replace(/\\/g, '/')}';
 
 export const handler = createImageHandler({
   cacheBucket: process.env.CACHE_BUCKET,
   sourcesBucket: process.env.ASSETS_BUCKET,
 });
 `;
+    await fs.writeFile(tempEntryPath, handlerCode.trimStart());
 
-    await fs.writeFile(path.join(imageDir, 'index.js'), handlerCode.trimStart());
+    await this.bundleWithEsbuild(tempEntryPath, path.join(imageDir, 'index.js'), ['sharp', '@img/*']);
+    await fs.remove(tempEntryPath);
+
+    await this.copySharpPackage(imageDir);
 
     await this.createZipArchive(imageDir, path.join(artifactsDir, 'image.zip'));
     await fs.remove(imageDir);
   }
 
-  private async copyRuntimePackage(
-    targetDir: string,
-    options: { includeImageDependencies: boolean },
+  private async bundleWithEsbuild(
+    entryPoint: string,
+    outfile: string,
+    external: string[],
   ): Promise<void> {
+    const esbuild = await import('esbuild');
+    await esbuild.build({
+      entryPoints: [entryPoint],
+      bundle: true,
+      outfile,
+      platform: 'node',
+      target: 'node22',
+      format: 'cjs',
+      minify: true,
+      treeShaking: true,
+      external,
+      logLevel: 'warning',
+    });
+  }
+
+  private async copySharpPackage(targetDir: string): Promise<void> {
     const nodeModulesDest = path.join(targetDir, 'node_modules');
     await fs.ensureDir(nodeModulesDest);
-    await this.copyPackageWithDependencies(
-      '@angular-yc/runtime',
-      nodeModulesDest,
-      new Set(),
-      undefined,
-      options.includeImageDependencies ? undefined : Builder.SERVER_RUNTIME_EXCLUDED_PACKAGES,
-    );
-  }
 
-  private async copyPackageWithDependencies(
-    packageName: string,
-    nodeModulesDest: string,
-    copiedPackages: Set<string>,
-    resolveFromDir?: string,
-    excludedPackages?: Set<string>,
-  ): Promise<void> {
-    if (this.isExcludedPackage(packageName, excludedPackages)) {
-      return;
-    }
+    const sharpPkgPath = require.resolve('sharp/package.json');
+    const sharpDir = path.dirname(sharpPkgPath);
+    await fs.copy(sharpDir, path.join(nodeModulesDest, 'sharp'), { dereference: true });
 
-    if (copiedPackages.has(packageName)) {
-      return;
-    }
-
-    copiedPackages.add(packageName);
-
-    const packageJsonPath = await this.resolvePackageJsonPath(packageName, resolveFromDir);
-    const packageDir = path.dirname(packageJsonPath);
-    const packageJson = await fs.readJson(packageJsonPath);
-
-    await fs.copy(packageDir, path.join(nodeModulesDest, packageName), {
-      dereference: true,
-      filter: (src) => !src.includes('.cache'),
-    });
-
-    const dependencies = Object.keys(packageJson.dependencies || {});
-    for (const dependency of dependencies) {
-      await this.copyPackageWithDependencies(
-        dependency,
-        nodeModulesDest,
-        copiedPackages,
-        packageDir,
-        excludedPackages,
-      );
-    }
-
-    const optionalDependencies = Object.keys(packageJson.optionalDependencies || {});
-    for (const dependency of optionalDependencies) {
+    const sharpPkg = await fs.readJson(sharpPkgPath);
+    const optionalDeps = Object.keys(sharpPkg.optionalDependencies || {});
+    for (const dep of optionalDeps) {
+      if (!dep.startsWith('@img/')) continue;
       try {
-        await this.copyPackageWithDependencies(
-          dependency,
-          nodeModulesDest,
-          copiedPackages,
-          packageDir,
-          excludedPackages,
-        );
-      } catch (error) {
-        if (this.isMissingModule(error)) {
-          continue;
-        }
-        throw error;
+        const depPkgPath = require.resolve(`${dep}/package.json`);
+        const depDir = path.dirname(depPkgPath);
+        const scope = dep.split('/')[0];
+        await fs.ensureDir(path.join(nodeModulesDest, scope));
+        await fs.copy(depDir, path.join(nodeModulesDest, dep), { dereference: true });
+      } catch {
+        // Platform-specific binary not available (expected on non-matching platforms)
       }
     }
-  }
-
-  private isExcludedPackage(
-    packageName: string,
-    excludedPackages?: Set<string>,
-  ): boolean {
-    if (!excludedPackages) {
-      return false;
-    }
-
-    if (excludedPackages.has(packageName)) {
-      return true;
-    }
-
-    return packageName.startsWith('@img/');
-  }
-
-  private isMissingModule(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null) {
-      return false;
-    }
-
-    const moduleError = error as { code?: string; message?: string };
-    return (
-      moduleError.code === 'MODULE_NOT_FOUND' ||
-      Boolean(moduleError.message?.includes('Cannot find module'))
-    );
-  }
-
-  private async resolvePackageJsonPath(
-    packageName: string,
-    resolveFromDir?: string,
-  ): Promise<string> {
-    const resolveOptions = resolveFromDir ? { paths: [resolveFromDir] } : undefined;
-
-    try {
-      return require.resolve(`${packageName}/package.json`, resolveOptions);
-    } catch {
-      const locatedPackageJson = await this.findPackageJsonByNodeModulesLookup(
-        packageName,
-        resolveFromDir,
-      );
-      if (locatedPackageJson) {
-        return locatedPackageJson;
-      }
-
-      const entryPath = require.resolve(packageName, resolveOptions);
-      const packageRoot = await this.findPackageRootFromEntry(entryPath, packageName);
-      if (!packageRoot) {
-        throw new Error(
-          `Unable to resolve package.json for "${packageName}" (resolved entry: ${entryPath})`,
-        );
-      }
-      return path.join(packageRoot, 'package.json');
-    }
-  }
-
-  private async findPackageJsonByNodeModulesLookup(
-    packageName: string,
-    resolveFromDir?: string,
-  ): Promise<string | undefined> {
-    if (!resolveFromDir) {
-      return undefined;
-    }
-
-    const packageParts = packageName.split('/');
-    let currentDir = path.resolve(resolveFromDir);
-    const filesystemRoot = path.parse(currentDir).root;
-
-    while (true) {
-      const candidatePath = path.join(currentDir, 'node_modules', ...packageParts, 'package.json');
-      if (await fs.pathExists(candidatePath)) {
-        return candidatePath;
-      }
-
-      if (currentDir === filesystemRoot) {
-        break;
-      }
-
-      const parentDir = path.dirname(currentDir);
-      if (parentDir === currentDir) {
-        break;
-      }
-      currentDir = parentDir;
-    }
-
-    return undefined;
-  }
-
-  private async findPackageRootFromEntry(
-    entryPath: string,
-    packageName: string,
-  ): Promise<string | undefined> {
-    let currentDir = path.dirname(entryPath);
-    const filesystemRoot = path.parse(currentDir).root;
-
-    while (true) {
-      const candidatePackageJson = path.join(currentDir, 'package.json');
-      if (await fs.pathExists(candidatePackageJson)) {
-        try {
-          const candidatePackage = await fs.readJson(candidatePackageJson);
-          if (candidatePackage?.name === packageName) {
-            return currentDir;
-          }
-        } catch {
-          // Ignore invalid package metadata while walking up.
-        }
-      }
-
-      if (currentDir === filesystemRoot || path.basename(currentDir) === 'node_modules') {
-        break;
-      }
-
-      const parentDir = path.dirname(currentDir);
-      if (parentDir === currentDir) {
-        break;
-      }
-      currentDir = parentDir;
-    }
-
-    const nodeModulesSegment = path.join('node_modules', packageName);
-    const segmentIndex = entryPath.lastIndexOf(nodeModulesSegment);
-    if (segmentIndex >= 0) {
-      return entryPath.slice(0, segmentIndex + nodeModulesSegment.length);
-    }
-
-    return undefined;
   }
 
   private async copyStaticAssets(
@@ -509,33 +361,6 @@ export const handler = createImageHandler({
     }
 
     await fs.writeFile(path.join(assetsDir, 'BUILD_ID'), buildId);
-  }
-
-  private async copyDependencies(projectPath: string, targetDir: string): Promise<void> {
-    const packageJsonPath = path.join(projectPath, 'package.json');
-    if (!(await fs.pathExists(packageJsonPath))) {
-      return;
-    }
-
-    const packageJson = await fs.readJson(packageJsonPath);
-    const dependencies = Object.keys(packageJson.dependencies || {});
-
-    const nodeModulesSource = path.join(projectPath, 'node_modules');
-    if (!(await fs.pathExists(nodeModulesSource))) {
-      return;
-    }
-
-    const nodeModulesDest = path.join(targetDir, 'node_modules');
-    await fs.ensureDir(nodeModulesDest);
-
-    for (const dependency of dependencies) {
-      const depSource = path.join(nodeModulesSource, dependency);
-      if (await fs.pathExists(depSource)) {
-        await fs.copy(depSource, path.join(nodeModulesDest, dependency), {
-          filter: (src) => !src.includes('.cache'),
-        });
-      }
-    }
   }
 
   private async createZipArchive(sourceDir: string, outputPath: string): Promise<void> {

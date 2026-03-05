@@ -224,7 +224,6 @@ async function fetchSourceImage(
     }
 
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      const fetch = (await import('node-fetch')).default;
       const response = await fetch(url);
 
       if (!response.ok) {
