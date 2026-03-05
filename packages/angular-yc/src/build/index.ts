@@ -249,7 +249,11 @@ export const handler = createServerHandler({
 `;
     await fs.writeFile(tempEntryPath, handlerCode.trimStart());
 
-    await this.bundleWithEsbuild(tempEntryPath, path.join(serverDir, 'index.js'), ['sharp', '@img/*']);
+    await this.bundleWithEsbuild(tempEntryPath, path.join(serverDir, 'index.js'), [
+      'sharp',
+      '@img/*',
+      '@yandex-cloud/*',
+    ]);
     await fs.remove(tempEntryPath);
 
     if (outputs.serverOutput && (await fs.pathExists(outputs.serverOutput))) {
