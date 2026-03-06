@@ -76,12 +76,6 @@ variable "build_dir" {
   default     = ""
 }
 
-variable "artifact_prefix" {
-  description = "Object Storage key prefix for uploaded artifacts (defaults to manifest buildId)"
-  type        = string
-  default     = ""
-}
-
 variable "server_zip_path" {
   description = "Path to server function zip (optional, uses manifest path if not set)"
   type        = string
@@ -159,10 +153,10 @@ variable "assets_bucket_name" {
   default     = ""
 }
 
-variable "cache_bucket_name" {
-  description = "Existing Object Storage bucket for response cache. If set with enable_response_cache=true, the module reuses it and does not create a new cache bucket."
-  type        = string
-  default     = ""
+variable "cdn_edge_cache_ttl" {
+  description = "CDN edge cache TTL in seconds (default 4 days). Only used when enable_cdn is true."
+  type        = number
+  default     = 345600
 }
 
 variable "prepared_instances" {

@@ -17,7 +17,7 @@ paths:
       x-yc-apigateway-integration:
         type: object_storage
         bucket: ${assets_bucket}
-        object: assets/${build_id}/browser/{proxy}
+        object: browser/{proxy}
         service_account_id: ${service_account_id}
 
   /assets/{proxy+}:
@@ -32,7 +32,7 @@ paths:
       x-yc-apigateway-integration:
         type: object_storage
         bucket: ${assets_bucket}
-        object: assets/${build_id}/browser/assets/{proxy}
+        object: browser/assets/{proxy}
         service_account_id: ${service_account_id}
 
   /favicon.ico:
@@ -41,7 +41,7 @@ paths:
       x-yc-apigateway-integration:
         type: object_storage
         bucket: ${assets_bucket}
-        object: assets/${build_id}/browser/favicon.ico
+        object: browser/favicon.ico
         service_account_id: ${service_account_id}
 
   /robots.txt:
@@ -50,7 +50,7 @@ paths:
       x-yc-apigateway-integration:
         type: object_storage
         bucket: ${assets_bucket}
-        object: assets/${build_id}/browser/robots.txt
+        object: browser/robots.txt
         service_account_id: ${service_account_id}
 
 %{ if has_image ~}

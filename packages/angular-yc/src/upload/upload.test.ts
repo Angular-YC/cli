@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import fs from 'fs-extra';
 import { glob } from 'glob';
@@ -7,7 +7,6 @@ import { Uploader } from './index.js';
 
 vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: vi.fn(),
-  PutObjectCommand: vi.fn(),
   ListObjectsV2Command: vi.fn(),
 }));
 
@@ -69,7 +68,6 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
     });
 
     expect(Upload).toHaveBeenCalled();
@@ -81,24 +79,11 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
       dryRun: true,
     });
 
     expect(Upload).not.toHaveBeenCalled();
     expect(mockS3Send).not.toHaveBeenCalled();
-  });
-
-  it('initializes response cache bucket when provided', async () => {
-    await uploader.upload({
-      buildDir: '/test/build',
-      assetsBucket: 'assets-bucket',
-      cacheBucket: 'cache-bucket',
-      prefix: 'build-123',
-    });
-
-    const putCalls = mockS3Send.mock.calls.filter((call) => call[0] instanceof PutObjectCommand);
-    expect(putCalls.length).toBeGreaterThan(0);
   });
 
   it('handles upload errors', async () => {
@@ -115,7 +100,6 @@ describe('Uploader', () => {
       uploader.upload({
         buildDir: '/test/build',
         assetsBucket: 'assets-bucket',
-        prefix: 'build-123',
       }),
     ).rejects.toThrow('S3 upload error');
   });
@@ -127,7 +111,6 @@ describe('Uploader', () => {
       uploader.upload({
         buildDir: '/test/build',
         assetsBucket: 'assets-bucket',
-        prefix: 'build-123',
       }),
     ).rejects.toThrow('Build directory not found');
   });
@@ -144,7 +127,6 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
     });
 
     const zipUploads = vi
@@ -158,7 +140,6 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
       endpoint: 'https://custom-storage.yandexcloud.net',
     });
 
@@ -173,7 +154,6 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
     });
 
     const manifestUpload = vi
@@ -193,7 +173,6 @@ describe('Uploader', () => {
     await uploader.upload({
       buildDir: '/test/build',
       assetsBucket: 'assets-bucket',
-      prefix: 'build-123',
     });
 
     const keys = await uploader.listObjects('assets-bucket', 'prefix/');

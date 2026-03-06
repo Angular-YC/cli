@@ -136,7 +136,7 @@ function generateCacheKey(params: ImageParams, accept: string): string {
   hash.update(params.w || '');
   hash.update(params.q || '');
   hash.update(accept);
-  return `images/${hash.digest('hex')}`;
+  return `_cache/images/${hash.digest('hex')}`;
 }
 
 async function getFromCache(
