@@ -28,9 +28,9 @@ output "assets_bucket" {
   value       = local.assets_bucket
 }
 
-output "cache_bucket" {
-  description = "Cache bucket name"
-  value       = var.enable_response_cache ? local.cache_bucket : null
+output "cdn_domain" {
+  description = "CDN domain"
+  value       = var.enable_cdn ? yandex_cdn_resource.main[0].cname : null
 }
 
 output "server_function_id" {

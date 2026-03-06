@@ -3,7 +3,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
-import fs from 'fs-extra';
 import { Analyzer } from './analyze/index.js';
 import { Builder } from './build/index.js';
 import { ManifestGenerator } from './manifest/index.js';
@@ -310,20 +309,6 @@ async function applyWithMissingLatestRecovery(
   }
 }
 
-async function readBuildIdFromManifest(buildDir: string): Promise<string> {
-  const manifestPath = path.join(buildDir, 'deploy.manifest.json');
-  if (!(await fs.pathExists(manifestPath))) {
-    throw new Error(`Manifest not found at ${manifestPath}`);
-  }
-
-  const manifest = await fs.readJson(manifestPath);
-  if (typeof manifest?.buildId !== 'string' || manifest.buildId.trim() === '') {
-    throw new Error(`Invalid buildId in ${manifestPath}`);
-  }
-
-  return manifest.buildId.trim();
-}
-
 program
   .command('analyze')
   .description('Analyze Angular project capabilities')
@@ -363,8 +348,6 @@ program
   .option('-b, --build-id <id>', 'Custom build ID')
   .option('--skip-build', 'Skip Angular build and package existing dist')
   .option('--bucket <name>', 'Assets bucket name (or resolve from terraform output)')
-  .option('--cache-bucket <name>', 'Cache bucket name (or resolve from terraform output)')
-  .option('--prefix <prefix>', 'Upload key prefix (defaults to buildId from manifest)')
   .option('--region <region>', 'YC region')
   .option('--endpoint <url>', 'S3 endpoint URL')
   .option('--app-name <name>', 'Terraform variable app_name')
@@ -504,7 +487,7 @@ program
           verbose: options.verbose,
         });
 
-        const manifest = await builder.build({
+        await builder.build({
           projectPath,
           outputDir,
           projectName: firstDefined(
@@ -532,12 +515,6 @@ program
           getEnvString(env, 'AYC_BUCKET'),
           getConfigString(mergedConfig, 'bucket'),
         );
-        const explicitCacheBucket = firstDefined(
-          cliOptionValue(command, 'cacheBucket', options.cacheBucket as string | undefined),
-          getEnvString(env, 'AYC_CACHE_BUCKET'),
-          getConfigString(mergedConfig, 'cacheBucket'),
-        );
-
         const assetsBucket = explicitAssetsBucket || extractOutputString(outputs, 'assets_bucket');
 
         if (!assetsBucket) {
@@ -546,21 +523,9 @@ program
           );
         }
 
-        const cacheBucket = explicitCacheBucket || extractOutputString(outputs, 'cache_bucket');
-        const prefix =
-          firstDefined(
-            cliOptionValue(command, 'prefix', options.prefix as string | undefined),
-            getEnvString(env, 'AYC_PREFIX'),
-            getConfigString(mergedConfig, 'prefix'),
-          ) ||
-          manifest.buildId ||
-          (await readBuildIdFromManifest(outputDir));
-
         await uploader.upload({
           buildDir: outputDir,
           assetsBucket,
-          prefix,
-          cacheBucket,
           region: deployRegion,
           endpoint: deployEndpoint,
           verbose: options.verbose,
@@ -631,13 +596,9 @@ program
           ...terraformVarEnv,
           TF_VAR_manifest_path: path.join(outputDir, 'deploy.manifest.json'),
           TF_VAR_build_dir: outputDir,
-          TF_VAR_artifact_prefix: prefix,
         };
         if (explicitAssetsBucket) {
           applyEnv.TF_VAR_assets_bucket_name = explicitAssetsBucket;
-        }
-        if (explicitCacheBucket) {
-          applyEnv.TF_VAR_cache_bucket_name = explicitCacheBucket;
         }
 
         const autoApprove =
@@ -655,7 +616,6 @@ program
 
         console.log(chalk.green('✅ Deploy complete'));
         console.log(chalk.cyan('📦 Assets bucket:'), assetsBucket);
-        console.log(chalk.cyan('🆔 Build ID:'), prefix);
         if (options.verbose && loadedConfig.path) {
           console.log(chalk.gray(`Config: ${loadedConfig.path}`));
         }
@@ -741,8 +701,6 @@ program
   .description('Upload build artifacts to Yandex Cloud Object Storage')
   .requiredOption('-b, --build-dir <dir>', 'Build artifacts directory')
   .requiredOption('--bucket <name>', 'S3 bucket name for assets')
-  .requiredOption('--prefix <prefix>', 'S3 key prefix (usually build ID)')
-  .option('--cache-bucket <name>', 'S3 bucket for response cache')
   .option('--region <region>', 'YC region', 'ru-central1')
   .option('--endpoint <url>', 'S3 endpoint URL')
   .option('-v, --verbose', 'Verbose output')
@@ -755,8 +713,6 @@ program
       await uploader.upload({
         buildDir,
         assetsBucket: options.bucket,
-        prefix: options.prefix,
-        cacheBucket: options.cacheBucket,
         region: options.region,
         endpoint: options.endpoint,
         verbose: options.verbose,

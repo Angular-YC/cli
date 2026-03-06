@@ -7,9 +7,6 @@ locals {
 
   build_id = local.manifest.buildId
 
-  requested_artifact_prefix = trimsuffix(trimprefix(trimspace(var.artifact_prefix), "/"), "/")
-  artifact_prefix           = local.requested_artifact_prefix != "" ? local.requested_artifact_prefix : local.build_id
-
   # Resource naming
   prefix = "${var.app_name}-${var.env}"
 
@@ -21,8 +18,6 @@ locals {
   # Bucket mode
   external_assets_bucket     = trimspace(var.assets_bucket_name)
   use_external_assets_bucket = local.external_assets_bucket != ""
-  external_cache_bucket      = trimspace(var.cache_bucket_name)
-  use_external_cache_bucket  = var.enable_response_cache && local.external_cache_bucket != ""
 
   # Common labels (for other resources - requires map of strings)
   common_labels = {
@@ -82,6 +77,17 @@ resource "yandex_storage_bucket" "assets" {
     }
   }
 
+  # Auto-expire cached images
+  lifecycle_rule {
+    enabled = true
+    id      = "expire-cache-prefix"
+    prefix  = "_cache/"
+
+    expiration {
+      days = var.cache_ttl_days
+    }
+  }
+
   # Access control - bucket is private by default
   acl = "private"
 
@@ -91,45 +97,8 @@ resource "yandex_storage_bucket" "assets" {
   tags = local.common_labels
 }
 
-# Cache bucket for Response cache
-resource "yandex_storage_bucket" "cache" {
-  count = var.enable_response_cache && !local.use_external_cache_bucket ? 1 : 0
-
-  bucket        = "${local.prefix}-cache-${random_id.bucket_suffix.hex}"
-  force_destroy = true
-
-  # Encryption - Yandex Object Storage encrypts all data at rest by default
-  # No need to specify encryption configuration as it's always enabled
-
-  versioning {
-    enabled = true
-  }
-
-  # Lifecycle for cache expiry
-  lifecycle_rule {
-    enabled = true
-    id      = "expire-cache"
-
-    expiration {
-      days = var.cache_ttl_days
-    }
-
-    transition {
-      days          = 7
-      storage_class = "COLD"
-    }
-  }
-
-  acl = "private"
-
-  tags = local.common_labels
-}
-
 locals {
   assets_bucket = local.use_external_assets_bucket ? local.external_assets_bucket : yandex_storage_bucket.assets[0].bucket
-  cache_bucket = var.enable_response_cache ? (
-    local.use_external_cache_bucket ? local.external_cache_bucket : yandex_storage_bucket.cache[0].bucket
-  ) : ""
 }
 
 # ============================================================================
@@ -238,7 +207,6 @@ resource "yandex_function" "server" {
     {
       BUILD_ID              = local.build_id
       NODE_ENV              = "production"
-      CACHE_BUCKET          = local.cache_bucket
       ASSETS_BUCKET         = local.assets_bucket
       YDB_ENDPOINT          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].ydb_full_endpoint : ""
       YDB_DATABASE          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].database_path : ""
@@ -267,7 +235,7 @@ resource "yandex_function" "server" {
   # Function package
   package {
     bucket_name = local.assets_bucket
-    object_name = "${local.artifact_prefix}/functions/server.zip"
+    object_name = "functions/server.zip"
   }
 
 }
@@ -296,14 +264,13 @@ resource "yandex_function" "image" {
     {
       BUILD_ID      = local.build_id
       NODE_ENV      = "production"
-      CACHE_BUCKET  = local.cache_bucket
       ASSETS_BUCKET = local.assets_bucket
     }
   )
 
   package {
     bucket_name = local.assets_bucket
-    object_name = "${local.artifact_prefix}/functions/image.zip"
+    object_name = "functions/image.zip"
   }
 
 }
@@ -317,7 +284,6 @@ locals {
   openapi_spec = templatefile("${path.module}/templates/openapi.yaml.tpl", {
     api_name           = "${local.prefix}-api"
     assets_bucket      = local.assets_bucket
-    build_id           = local.build_id
     server_function_id = local.manifest.capabilities.rendering.needsServer ? yandex_function.server[0].id : ""
     image_function_id  = local.manifest.capabilities.assets.needsImage ? yandex_function.image[0].id : ""
     service_account_id = yandex_iam_service_account.functions.id
@@ -345,6 +311,46 @@ resource "yandex_api_gateway" "main" {
 
   lifecycle {
     ignore_changes = [spec]
+  }
+
+  labels = local.common_labels
+}
+
+# ============================================================================
+# CDN (Optional)
+# ============================================================================
+
+resource "yandex_cdn_origin_group" "main" {
+  count = var.enable_cdn ? 1 : 0
+
+  name = "${local.prefix}-cdn-origins"
+
+  origin {
+    source  = yandex_api_gateway.main.domain
+    enabled = true
+    backup  = false
+  }
+}
+
+resource "yandex_cdn_resource" "main" {
+  count = var.enable_cdn ? 1 : 0
+
+  cname               = var.domain_name
+  origin_group_id     = yandex_cdn_origin_group.main[0].id
+  origin_protocol     = "https"
+  active              = true
+
+  ssl_certificate {
+    type                   = "cm"
+    certificate_manager_id = local.certificate_id
+  }
+
+  options {
+    edge_cache_settings    = var.cdn_edge_cache_ttl
+    browser_cache_settings = 0
+    ignore_query_params    = false
+    cors                   = var.allowed_origins
+    gzip_on                = true
   }
 
   labels = local.common_labels
@@ -397,7 +403,7 @@ resource "yandex_dns_recordset" "api_gateway" {
   name    = "${trimsuffix(var.domain_name, ".")}."
   type    = "CNAME"
   ttl     = 300
-  data    = [yandex_api_gateway.main.domain]
+  data    = [var.enable_cdn ? yandex_cdn_resource.main[0].cname : yandex_api_gateway.main.domain]
 }
 
 # ============================================================================

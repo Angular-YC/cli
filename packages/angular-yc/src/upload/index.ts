@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import fs from 'fs-extra';
 import path from 'path';
@@ -9,8 +9,6 @@ import ora from 'ora';
 export interface UploadOptions {
   buildDir: string;
   assetsBucket: string;
-  prefix: string;
-  cacheBucket?: string;
   region?: string;
   endpoint?: string;
   verbose?: boolean;
@@ -25,8 +23,6 @@ export class Uploader {
     const {
       buildDir,
       assetsBucket,
-      prefix,
-      cacheBucket,
       region = 'ru-central1',
       endpoint = 'https://storage.yandexcloud.net',
       verbose,
@@ -49,7 +45,7 @@ export class Uploader {
         const uploaded = await this.uploadDirectory(
           assetsDir,
           assetsBucket,
-          `${prefix}/assets`,
+          '',
           dryRun,
           verbose,
         );
@@ -59,8 +55,8 @@ export class Uploader {
       }
 
       const functionZips = [
-        { file: 'server.zip', key: `${prefix}/functions/server.zip` },
-        { file: 'image.zip', key: `${prefix}/functions/image.zip` },
+        { file: 'server.zip', key: 'functions/server.zip' },
+        { file: 'image.zip', key: 'functions/image.zip' },
       ];
 
       for (const { file, key } of functionZips) {
@@ -80,34 +76,10 @@ export class Uploader {
       const manifestPath = path.join(buildDir, 'deploy.manifest.json');
       if (await fs.pathExists(manifestPath)) {
         spinner.start('Uploading deployment manifest...');
-        const manifestKey = `${prefix}/manifest.json`;
         if (!dryRun) {
-          await this.uploadFile(manifestPath, assetsBucket, manifestKey);
+          await this.uploadFile(manifestPath, assetsBucket, 'manifest.json');
         }
         spinner.succeed('Uploaded deployment manifest');
-      }
-
-      if (cacheBucket) {
-        spinner.start('Initializing response cache bucket...');
-        const cacheKeys = [
-          `${prefix}/response-cache/.initialized`,
-          `${prefix}/cache-metadata/.initialized`,
-        ];
-
-        for (const key of cacheKeys) {
-          if (!dryRun) {
-            await this.s3Client.send(
-              new PutObjectCommand({
-                Bucket: cacheBucket,
-                Key: key,
-                Body: JSON.stringify({ timestamp: new Date().toISOString() }),
-                ContentType: 'application/json',
-              }),
-            );
-          }
-        }
-
-        spinner.succeed('Response cache bucket initialized');
       }
 
       if (dryRun) {
@@ -115,10 +87,6 @@ export class Uploader {
       } else {
         console.log(chalk.cyan('\nUpload summary:'));
         console.log(chalk.gray(`  Assets bucket: ${assetsBucket}`));
-        console.log(chalk.gray(`  Prefix: ${prefix}`));
-        if (cacheBucket) {
-          console.log(chalk.gray(`  Cache bucket: ${cacheBucket}`));
-        }
       }
     } catch (error) {
       spinner.fail('Upload failed');
@@ -142,7 +110,7 @@ export class Uploader {
 
     for (const file of files) {
       const localPath = path.join(localDir, file);
-      const s3Key = `${s3Prefix}/${file}`;
+      const s3Key = s3Prefix ? `${s3Prefix}/${file}` : file;
 
       if (!dryRun) {
         await this.uploadFile(localPath, bucket, s3Key);

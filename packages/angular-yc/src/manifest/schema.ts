@@ -190,7 +190,7 @@ export function createDefaultManifest(
     artifacts: {
       assets: {
         localDir: './artifacts/assets',
-        bucketKeyPrefix: `assets/${buildId}`,
+        bucketKeyPrefix: '',
         browserDir: './artifacts/assets/browser',
         prerenderDir: capabilities.prerender.enabled ? './artifacts/assets/prerender' : undefined,
       },
@@ -217,7 +217,7 @@ export function createDefaultManifest(
     responseCache: capabilities.responseCache.enabled
       ? {
           cache: {
-            bucketPrefix: `response-cache/${buildId}`,
+            bucketPrefix: '_cache/response',
           },
           ydb: {
             tables: {

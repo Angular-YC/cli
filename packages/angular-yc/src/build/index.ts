@@ -98,7 +98,7 @@ export class Builder {
       spinner.succeed('Static assets copied');
 
       spinner.start('Generating API Gateway spec...');
-      await this.generateOpenAPISpec(outputDir, capabilities, buildId);
+      await this.generateOpenAPISpec(outputDir, capabilities);
       spinner.succeed('API Gateway spec generated');
 
       spinner.start('Creating deployment manifest...');
@@ -285,7 +285,7 @@ export const handler = createServerHandler({
 import { createImageHandler } from '${runtimeEntryPath.replace(/\\/g, '/')}';
 
 export const handler = createImageHandler({
-  cacheBucket: process.env.CACHE_BUCKET,
+  cacheBucket: process.env.ASSETS_BUCKET,
   sourcesBucket: process.env.ASSETS_BUCKET,
 });
 `;
@@ -392,7 +392,6 @@ export const handler = createImageHandler({
   private async generateOpenAPISpec(
     outputDir: string,
     capabilities: DeployManifest['capabilities'],
-    buildId: string,
   ): Promise<void> {
     const spec: Record<string, unknown> = {
       openapi: '3.0.0',
@@ -406,7 +405,7 @@ export const handler = createImageHandler({
             'x-yc-apigateway-integration': {
               type: 'object_storage',
               bucket: '${var.assets_bucket}',
-              object: `assets/${buildId}/browser/{proxy}`,
+              object: 'browser/{proxy}',
               service_account_id: '${var.service_account_id}',
             },
             parameters: [
@@ -424,7 +423,7 @@ export const handler = createImageHandler({
             'x-yc-apigateway-integration': {
               type: 'object_storage',
               bucket: '${var.assets_bucket}',
-              object: `assets/${buildId}/browser/assets/{proxy}`,
+              object: 'browser/assets/{proxy}',
               service_account_id: '${var.service_account_id}',
             },
             parameters: [
@@ -442,7 +441,7 @@ export const handler = createImageHandler({
             'x-yc-apigateway-integration': {
               type: 'object_storage',
               bucket: '${var.assets_bucket}',
-              object: `assets/${buildId}/browser/favicon.ico`,
+              object: 'browser/favicon.ico',
               service_account_id: '${var.service_account_id}',
             },
           },
@@ -452,7 +451,7 @@ export const handler = createImageHandler({
             'x-yc-apigateway-integration': {
               type: 'object_storage',
               bucket: '${var.assets_bucket}',
-              object: `assets/${buildId}/browser/robots.txt`,
+              object: 'browser/robots.txt',
               service_account_id: '${var.service_account_id}',
             },
           },
