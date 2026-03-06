@@ -78,7 +78,7 @@ paths:
         type: cloud_functions
         function_id: ${image_function_id}
         service_account_id: ${service_account_id}
-        payload_format_version: "1.0"
+        payload_format_version: "2.0"
 %{ endif ~}
 
 %{ if has_server ~}
@@ -96,7 +96,7 @@ paths:
         type: cloud_functions
         function_id: ${server_function_id}
         service_account_id: ${service_account_id}
-        payload_format_version: "1.0"
+        payload_format_version: "2.0"
 
   # Catch-all for Angular SSR
   /{proxy+}:
@@ -112,7 +112,7 @@ paths:
         type: cloud_functions
         function_id: ${server_function_id}
         service_account_id: ${service_account_id}
-        payload_format_version: "1.0"
+        payload_format_version: "2.0"
 
   # Root path
   /:
@@ -122,5 +122,5 @@ paths:
         type: cloud_functions
         function_id: ${server_function_id}
         service_account_id: ${service_account_id}
-        payload_format_version: "1.0"
+        payload_format_version: "2.0"
 %{ endif ~}

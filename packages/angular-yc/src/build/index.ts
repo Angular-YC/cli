@@ -468,7 +468,7 @@ export const handler = createImageHandler({
             type: 'cloud_functions',
             function_id: '${var.image_function_id}',
             service_account_id: '${var.service_account_id}',
-            payload_format_version: '1.0',
+            payload_format_version: '2.0',
           },
           parameters: [
             {
@@ -501,7 +501,7 @@ export const handler = createImageHandler({
             type: 'cloud_functions',
             function_id: '${var.server_function_id}',
             service_account_id: '${var.service_account_id}',
-            payload_format_version: '1.0',
+            payload_format_version: '2.0',
           },
           parameters: [
             {
@@ -520,7 +520,7 @@ export const handler = createImageHandler({
             type: 'cloud_functions',
             function_id: '${var.server_function_id}',
             service_account_id: '${var.service_account_id}',
-            payload_format_version: '1.0',
+            payload_format_version: '2.0',
           },
           parameters: [
             {
@@ -539,7 +539,7 @@ export const handler = createImageHandler({
             type: 'cloud_functions',
             function_id: '${var.server_function_id}',
             service_account_id: '${var.service_account_id}',
-            payload_format_version: '1.0',
+            payload_format_version: '2.0',
           },
         },
       };
