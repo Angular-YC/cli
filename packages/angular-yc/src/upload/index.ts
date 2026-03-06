@@ -42,13 +42,7 @@ export class Uploader {
       spinner.start('Uploading static assets...');
       const assetsDir = path.join(buildDir, 'artifacts', 'assets');
       if (await fs.pathExists(assetsDir)) {
-        const uploaded = await this.uploadDirectory(
-          assetsDir,
-          assetsBucket,
-          '',
-          dryRun,
-          verbose,
-        );
+        const uploaded = await this.uploadDirectory(assetsDir, assetsBucket, '', dryRun, verbose);
         spinner.succeed(`Uploaded ${uploaded.length} asset files`);
       } else {
         spinner.warn('No static assets found');
