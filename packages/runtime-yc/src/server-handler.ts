@@ -343,30 +343,21 @@ function handleViaNode(
       return origSetHeader(name, v);
     };
 
-    const origWrite = res.write.bind(res);
-    res.write = function (chunk: unknown, ...args: unknown[]) {
+    // Do NOT delegate to the real res.write / res.end.
+    // ServerResponse without a socket returns false (backpressure) from write(),
+    // which causes Express to pause file streams and wait for a 'drain' event
+    // that never fires — resulting in a 30 s timeout for any large static asset.
+    res.write = function (chunk: unknown) {
       if (chunk) {
-        const buf = Buffer.isBuffer(chunk)
-          ? chunk
-          : chunk instanceof Uint8Array
-            ? Buffer.from(chunk)
-            : Buffer.from(String(chunk));
+        const buf = toBuffer(chunk);
         chunks.push(buf);
         console.log(`[Server:Node] write(${buf.length} bytes) (+${Date.now() - nodeStart}ms)`);
       }
-      return origWrite(chunk as never, ...(args as []));
-    };
+      return true; // No backpressure — buffering in memory.
+    } as typeof res.write;
 
-    const origEnd = res.end.bind(res);
-    res.end = function (chunk?: unknown, ...args: unknown[]) {
-      if (chunk)
-        chunks.push(
-          Buffer.isBuffer(chunk)
-            ? chunk
-            : chunk instanceof Uint8Array
-              ? Buffer.from(chunk)
-              : Buffer.from(String(chunk)),
-        );
+    res.end = function (chunk?: unknown) {
+      if (chunk) chunks.push(toBuffer(chunk));
 
       const body = Buffer.concat(chunks);
       const ct = resHeaders['content-type'];
@@ -398,8 +389,8 @@ function handleViaNode(
       }
 
       resolve(result);
-      return origEnd(chunk as never, ...(args as []));
-    };
+      return res;
+    } as typeof res.end;
 
     res.on('error', (err) => {
       console.error(
@@ -461,6 +452,12 @@ function normalizeNodeHandler(candidate: unknown): NodeRequestHandler {
   throw new Error(
     'Unsupported server export shape. Expected function or object with handle(req,res).',
   );
+}
+
+function toBuffer(chunk: unknown): Buffer {
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return Buffer.from(String(chunk));
 }
 
 function shouldBase64Encode(contentType?: string): boolean {
