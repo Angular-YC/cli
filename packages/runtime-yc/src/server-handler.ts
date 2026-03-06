@@ -1,13 +1,10 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import path from 'path';
 import fs from 'fs';
-import { createHash } from 'crypto';
-import { parse as parseQuery } from 'querystring';
-import {
-  createResponseCache,
-  ResponseCache,
-  ResponseCacheOptions,
-} from './response-cache/cache.js';
+
+/* ------------------------------------------------------------------ */
+/*  Yandex Cloud Functions event / response types                     */
+/* ------------------------------------------------------------------ */
 
 export interface APIGatewayProxyEventV2 {
   version: string;
@@ -47,15 +44,25 @@ export interface APIGatewayProxyResultV2 {
   cookies?: string[];
 }
 
+/* ------------------------------------------------------------------ */
+/*  Public API                                                        */
+/* ------------------------------------------------------------------ */
+
 export interface HandlerOptions {
   dir: string;
   trustProxy?: boolean;
   handlerExportName?: string;
   serverModuleCandidates?: string[];
-  responseCache?: ResponseCacheOptions;
+  /** @deprecated Caching is temporarily disabled while handler is simplified. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  responseCache?: any;
 }
 
 type NodeRequestHandler = (req: IncomingMessage, res: ServerResponse) => unknown;
+
+interface AngularEngine {
+  handle(request: Request): Promise<Response | null>;
+}
 
 export function createServerHandler(options: HandlerOptions) {
   const {
@@ -76,52 +83,33 @@ export function createServerHandler(options: HandlerOptions) {
       'main.server.mjs',
       'main.server.js',
     ],
-    responseCache: cacheOptions = { enabled: false, driver: 'memory', defaultTtlSeconds: 60 },
   } = options;
 
   const debug = Boolean(process.env.AYC_DEBUG);
-  let appHandler: NodeRequestHandler | null = null;
-  let responseCache: ResponseCache | null = null;
+
+  let engine: AngularEngine | null = null;
+  let nodeHandler: NodeRequestHandler | null = null;
 
   const initialize = async (): Promise<void> => {
-    if (!responseCache) {
-      const driver =
-        process.env.RESPONSE_CACHE_DRIVER === 'ydb' || cacheOptions.driver === 'ydb'
-          ? 'ydb'
-          : 'memory';
-
-      const ydbEnabled =
-        driver === 'ydb' &&
-        Boolean(process.env.YDB_ENDPOINT) &&
-        Boolean(process.env.YDB_DATABASE) &&
-        Boolean(process.env.CACHE_BUCKET) &&
-        Boolean(process.env.BUILD_ID);
-
-      responseCache = createResponseCache({
-        enabled: cacheOptions.enabled,
-        driver: ydbEnabled ? 'ydb' : 'memory',
-        defaultTtlSeconds: cacheOptions.defaultTtlSeconds,
-        ydb: ydbEnabled
-          ? {
-              ydbEndpoint: process.env.YDB_ENDPOINT || '',
-              ydbDatabase: process.env.YDB_DATABASE || '',
-              cacheBucket: process.env.CACHE_BUCKET || '',
-              buildId: process.env.BUILD_ID || 'local',
-              defaultTtlSeconds: cacheOptions.defaultTtlSeconds,
-            }
-          : undefined,
-      });
-    }
-
-    if (appHandler) {
-      return;
-    }
+    if (engine || nodeHandler) return;
 
     const modulePath = resolveServerModule(dir, serverModuleCandidates);
     if (debug) console.log(`[Server] Loading module: ${modulePath}`);
     const imported = await import(modulePath);
     if (debug) console.log(`[Server] Module exports: ${Object.keys(imported).join(', ')}`);
 
+    // Prefer AngularAppEngine — works with Web Request/Response, no Node shim needed.
+    const EngineClass = imported.AngularAppEngine;
+    if (typeof EngineClass === 'function') {
+      try {
+        engine = new EngineClass() as AngularEngine;
+        if (debug) console.log('[Server] Using AngularAppEngine (Web API path)');
+      } catch {
+        if (debug) console.log('[Server] AngularAppEngine instantiation failed, using Node path');
+      }
+    }
+
+    // Node handler as fallback (API routes, or full Express app if no engine).
     const candidate =
       (handlerExportName ? imported[handlerExportName] : undefined) ||
       imported.reqHandler ||
@@ -130,254 +118,201 @@ export function createServerHandler(options: HandlerOptions) {
       imported.default ||
       imported.render;
 
-    if (!candidate) {
-      throw new Error(`Could not find server export in ${modulePath}`);
+    if (candidate) {
+      nodeHandler = normalizeNodeHandler(candidate);
+      if (debug) console.log(`[Server] Node handler resolved (type: ${typeof candidate})`);
     }
 
-    if (debug) console.log(`[Server] Handler resolved (type: ${typeof candidate})`);
-    appHandler = normalizeNodeHandler(candidate);
+    if (!engine && !nodeHandler) {
+      throw new Error(`Could not find a usable server export in ${modulePath}`);
+    }
   };
 
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+    const startTime = Date.now();
     try {
-      const startTime = Date.now();
-      if (debug) {
-        console.log(
-          `[Server] ${event.requestContext?.http?.method || '?'} ${event.rawPath || '?'}${event.rawQueryString ? '?' + event.rawQueryString : ''}`,
-        );
-        console.log(`[Server] Headers: ${JSON.stringify(event.headers)}`);
-      }
-
       await initialize();
-      if (!appHandler || !responseCache) {
-        throw new Error('Server runtime not initialized');
+
+      const method = event.requestContext?.http?.method || 'GET';
+      const urlPath = event.rawPath || '/';
+      if (debug) {
+        console.log(`[Server] ${method} ${urlPath} (+${Date.now() - startTime}ms)`);
       }
 
-      if (debug) console.log(`[Server] Init done (${Date.now() - startTime}ms)`);
+      // API routes → Node handler (Express) directly, skip Angular SSR.
+      if (urlPath.startsWith('/api/') && nodeHandler) {
+        if (debug) console.log(`[Server] API route → Node handler`);
+        return await handleViaNode(nodeHandler, event, trustProxy);
+      }
 
-      const cacheableRequest = shouldCacheRequest(event);
-      const cacheKey = cacheableRequest ? createCacheKey(event) : null;
+      // SSR pages → AngularAppEngine with Web Request/Response.
+      if (engine) {
+        const webRequest = buildWebRequest(event, trustProxy);
+        const response = await engine.handle(webRequest);
 
-      if (cacheableRequest && cacheKey) {
-        const cached = await responseCache.get(cacheKey);
-        if (cached) {
-          if (debug) console.log(`[Server] Cache hit (${Date.now() - startTime}ms)`);
-          return {
-            statusCode: cached.statusCode,
-            headers: cached.headers,
-            body: cached.body,
-            isBase64Encoded: cached.isBase64Encoded,
-          };
+        if (response) {
+          const result = await toYCResponse(response);
+          if (debug) console.log(`[Server] ${result.statusCode} (+${Date.now() - startTime}ms)`);
+          return result;
         }
       }
 
-      const { req, res, responsePromise } = createNodeRequestResponse(event, trustProxy);
+      // Fallback: Node handler for anything the engine didn't match.
+      if (nodeHandler) {
+        if (debug) console.log(`[Server] Fallback → Node handler`);
+        return await handleViaNode(nodeHandler, event, trustProxy);
+      }
 
-      if (debug) console.log(`[Server] Calling handler...`);
-
-      const originalFetch = globalThis.fetch;
-      let fetchCount = 0;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).fetch = function tracedFetch(input: any, init?: any) {
-        fetchCount++;
-        const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.href
-              : (input?.url ?? String(input));
-        const method = init?.method || 'GET';
-        console.log(
-          `[Server] fetch #${fetchCount}: ${method} ${url} (+${Date.now() - startTime}ms)`,
-        );
-        return originalFetch(input, init).then(
-          (resp) => {
-            console.log(
-              `[Server] fetch #${fetchCount} done: ${resp.status} (+${Date.now() - startTime}ms)`,
-            );
-            return resp;
-          },
-          (err) => {
-            console.log(
-              `[Server] fetch #${fetchCount} error: ${err?.message || err} (+${Date.now() - startTime}ms)`,
-            );
-            throw err;
-          },
-        );
+      return {
+        statusCode: 404,
+        headers: { 'content-type': 'text/plain' },
+        body: 'Not Found',
+        isBase64Encoded: false,
       };
-
-      const writeTimer = setInterval(() => {
-        console.log(
-          `[Server] Still waiting for response... (+${Date.now() - startTime}ms, fetches: ${fetchCount})`,
-        );
-      }, 5000);
-
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const maybePromise = appHandler!(req, res);
-
-          res.on('finish', () => {
-            console.log(`[Server] res.finish event (+${Date.now() - startTime}ms)`);
-            resolve();
-          });
-          res.on('error', (err) => {
-            console.log(
-              `[Server] res.error event: ${err?.message || err} (+${Date.now() - startTime}ms)`,
-            );
-            reject(err);
-          });
-
-          if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-            (maybePromise as Promise<unknown>).catch(reject);
-          }
-        });
-      } finally {
-        clearInterval(writeTimer);
-        globalThis.fetch = originalFetch;
-      }
-
-      if (debug) console.log(`[Server] Handler done (${Date.now() - startTime}ms)`);
-
-      const result = await responsePromise;
-
-      if (cacheableRequest && cacheKey && shouldCacheResponse(result)) {
-        await responseCache.set(
-          cacheKey,
-          {
-            statusCode: result.statusCode,
-            headers: toStringHeaders(result.headers || {}),
-            body: result.body || '',
-            isBase64Encoded: result.isBase64Encoded,
-          },
-          {
-            ttlSeconds: cacheOptions.defaultTtlSeconds || 60,
-          },
-        );
-      }
-
-      if (debug)
-        console.log(`[Server] Response: ${result.statusCode} (${Date.now() - startTime}ms)`);
-      return result;
     } catch (error) {
       console.error('[Server] Error handling request:', error);
       return {
         statusCode: 500,
-        headers: {
-          'content-type': 'text/plain',
-        },
+        headers: { 'content-type': 'text/plain' },
         body: 'Internal Server Error',
+        isBase64Encoded: false,
       };
     }
   };
 }
 
-function resolveServerModule(dir: string, candidates: string[]): string {
-  for (const candidate of candidates) {
-    const fullPath = path.resolve(dir, candidate);
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
-    }
+/* ------------------------------------------------------------------ */
+/*  Web Request / Response helpers                                    */
+/* ------------------------------------------------------------------ */
+
+function buildWebRequest(event: APIGatewayProxyEventV2, trustProxy: boolean): Request {
+  const headers = event.headers ?? {};
+
+  const host = trustProxy
+    ? headers['x-forwarded-host'] || headers['host'] || 'localhost'
+    : headers['host'] || 'localhost';
+
+  const proto = trustProxy ? headers['x-forwarded-proto'] || 'https' : 'https';
+
+  const urlPath = event.rawPath || '/';
+  const qs = event.rawQueryString ? `?${event.rawQueryString}` : '';
+  const url = `${proto}://${host}${urlPath}${qs}`;
+
+  const reqHeaders = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (value != null) reqHeaders.set(key, value);
+  }
+  if (event.cookies?.length) {
+    reqHeaders.set('cookie', event.cookies.join('; '));
   }
 
-  throw new Error(`Could not resolve Angular SSR server module in ${dir}`);
+  const method = event.requestContext.http.method;
+  const hasBody = !['GET', 'HEAD'].includes(method) && event.body;
+
+  let body: string | Buffer | undefined;
+  if (hasBody) {
+    body = event.isBase64Encoded ? Buffer.from(event.body!, 'base64') : event.body!;
+  }
+
+  return new Request(url, { method, headers: reqHeaders, body });
 }
 
-function normalizeNodeHandler(candidate: unknown): NodeRequestHandler {
-  if (typeof candidate === 'function') {
-    return candidate as NodeRequestHandler;
-  }
+async function toYCResponse(response: Response): Promise<APIGatewayProxyResultV2> {
+  const responseHeaders: Record<string, string> = {};
+  const cookies: string[] = [];
 
-  if (candidate && typeof candidate === 'object' && 'handle' in candidate) {
-    const handle = (candidate as { handle: NodeRequestHandler }).handle;
-    if (typeof handle === 'function') {
-      return handle.bind(candidate);
+  response.headers.forEach((value, key) => {
+    if (key.toLowerCase() === 'set-cookie') {
+      cookies.push(value);
+    } else {
+      responseHeaders[key] = value;
     }
-  }
-
-  throw new Error(
-    'Unsupported server export shape. Expected function or object with handle(req,res).',
-  );
-}
-
-function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: boolean) {
-  const req = new IncomingMessage(null as never) as IncomingMessage & {
-    body?: unknown;
-    rawBody?: string;
-  };
-
-  req.method = event.requestContext.http.method;
-  req.url = event.rawPath + (event.rawQueryString ? `?${event.rawQueryString}` : '');
-
-  req.headers = {};
-  for (const [key, value] of Object.entries(event.headers || {})) {
-    if (value !== undefined) {
-      req.headers[key.toLowerCase()] = value;
-    }
-  }
-
-  if (event.cookies && event.cookies.length > 0) {
-    req.headers.cookie = event.cookies.join('; ');
-  }
-
-  const ipAddress =
-    trustProxy && req.headers['x-forwarded-for']
-      ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
-      : event.requestContext.http.sourceIp;
-
-  Object.defineProperty(req, 'socket', {
-    value: { remoteAddress: ipAddress },
-    writable: true,
   });
 
-  const responseChunks: Buffer[] = [];
-  const responseHeaders: Record<string, string | string[]> = {};
-  let statusCode = 200;
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
 
-  const res = new ServerResponse(req) as ServerResponse;
+  const contentType = responseHeaders['content-type'] || '';
+  const isBase64 = shouldBase64Encode(contentType);
 
-  const responsePromise = new Promise<APIGatewayProxyResultV2>((resolve) => {
-    const originalWriteHead = res.writeHead.bind(res);
+  const result: APIGatewayProxyResultV2 = {
+    statusCode: response.status,
+    headers: responseHeaders,
+    body: isBase64 ? buffer.toString('base64') : buffer.toString('utf-8'),
+    isBase64Encoded: isBase64,
+  };
+
+  if (cookies.length > 0) {
+    result.cookies = cookies;
+  }
+
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Node.js fallback (API routes / legacy handlers)                   */
+/* ------------------------------------------------------------------ */
+
+function handleViaNode(
+  handler: NodeRequestHandler,
+  event: APIGatewayProxyEventV2,
+  trustProxy: boolean,
+): Promise<APIGatewayProxyResultV2> {
+  return new Promise((resolve, reject) => {
+    const req = new IncomingMessage(null as never);
+    req.method = event.requestContext.http.method;
+    req.url = event.rawPath + (event.rawQueryString ? `?${event.rawQueryString}` : '');
+
+    req.headers = {};
+    for (const [key, value] of Object.entries(event.headers || {})) {
+      if (value !== undefined) req.headers[key.toLowerCase()] = value;
+    }
+    if (event.cookies?.length) {
+      req.headers.cookie = event.cookies.join('; ');
+    }
+
+    const ip =
+      trustProxy && req.headers['x-forwarded-for']
+        ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
+        : event.requestContext.http.sourceIp;
+
+    Object.defineProperty(req, 'socket', {
+      value: { remoteAddress: ip },
+      writable: true,
+    });
+
+    const chunks: Buffer[] = [];
+    const resHeaders: Record<string, string | string[]> = {};
+    let statusCode = 200;
+
+    const res = new ServerResponse(req);
+
+    const origWriteHead = res.writeHead.bind(res);
     res.writeHead = function (code: number, ...args: unknown[]) {
       statusCode = code;
-      return originalWriteHead(code, ...(args as []));
+      return origWriteHead(code, ...(args as []));
     };
 
-    const originalSetHeader = res.setHeader.bind(res);
+    const origSetHeader = res.setHeader.bind(res);
     res.setHeader = function (name: string, value: number | string | readonly string[]) {
-      let normalizedValue: string | string[];
-      if (Array.isArray(value)) {
-        normalizedValue = value.map((item) => String(item));
-      } else if (typeof value === 'number') {
-        normalizedValue = String(value);
-      } else if (typeof value === 'string') {
-        normalizedValue = value;
-      } else {
-        normalizedValue = Array.from(value);
-      }
-
-      responseHeaders[name.toLowerCase()] = normalizedValue;
-      return originalSetHeader(name, normalizedValue);
+      const v = Array.isArray(value) ? value.map(String) : String(value);
+      resHeaders[name.toLowerCase()] = v;
+      return origSetHeader(name, v);
     };
 
-    const originalWrite = res.write.bind(res);
+    const origWrite = res.write.bind(res);
     res.write = function (chunk: unknown, ...args: unknown[]) {
-      if (chunk) {
-        responseChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-      }
-      return originalWrite(chunk as never, ...(args as []));
+      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      return origWrite(chunk as never, ...(args as []));
     };
 
-    const originalEnd = res.end.bind(res);
+    const origEnd = res.end.bind(res);
     res.end = function (chunk?: unknown, ...args: unknown[]) {
-      if (chunk) {
-        responseChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-      }
+      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
 
-      const body = Buffer.concat(responseChunks);
-      const contentType = responseHeaders['content-type'];
-      const isBase64 = shouldBase64Encode(
-        Array.isArray(contentType) ? contentType[0] : contentType,
-      );
+      const body = Buffer.concat(chunks);
+      const ct = resHeaders['content-type'];
+      const isBase64 = shouldBase64Encode(Array.isArray(ct) ? ct[0] : ct);
 
       const result: APIGatewayProxyResultV2 = {
         statusCode,
@@ -386,7 +321,7 @@ function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: bo
         isBase64Encoded: isBase64,
       };
 
-      for (const [key, value] of Object.entries(responseHeaders)) {
+      for (const [key, value] of Object.entries(resHeaders)) {
         if (Array.isArray(value)) {
           result.multiValueHeaders = result.multiValueHeaders || {};
           result.multiValueHeaders[key] = value;
@@ -395,42 +330,64 @@ function createNodeRequestResponse(event: APIGatewayProxyEventV2, trustProxy: bo
         }
       }
 
-      const setCookie = responseHeaders['set-cookie'];
+      const setCookie = resHeaders['set-cookie'];
       if (setCookie) {
         result.cookies = Array.isArray(setCookie) ? setCookie.map(String) : [String(setCookie)];
       }
 
       resolve(result);
-      return originalEnd(chunk as never, ...(args as []));
+      return origEnd(chunk as never, ...(args as []));
     };
+
+    res.on('error', reject);
+
+    // Emit body asynchronously (matches Express expectations).
+    if (event.body) {
+      const buf = event.isBase64Encoded
+        ? Buffer.from(event.body, 'base64')
+        : Buffer.from(event.body, 'utf-8');
+      queueMicrotask(() => {
+        req.emit('data', buf);
+        req.emit('end');
+      });
+    } else {
+      queueMicrotask(() => req.emit('end'));
+    }
+
+    const maybePromise = handler(req, res);
+    if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+      (maybePromise as Promise<unknown>).catch(reject);
+    }
   });
+}
 
-  if (event.body) {
-    const bodyBuffer = event.isBase64Encoded
-      ? Buffer.from(event.body, 'base64')
-      : Buffer.from(event.body, 'utf-8');
+/* ------------------------------------------------------------------ */
+/*  Shared utilities                                                  */
+/* ------------------------------------------------------------------ */
 
-    req.rawBody = bodyBuffer.toString('utf-8');
-    req.body = tryParseJson(req.rawBody);
+function resolveServerModule(dir: string, candidates: string[]): string {
+  for (const candidate of candidates) {
+    const fullPath = path.resolve(dir, candidate);
+    if (fs.existsSync(fullPath)) return fullPath;
+  }
+  throw new Error(`Could not resolve Angular SSR server module in ${dir}`);
+}
 
-    queueMicrotask(() => {
-      req.emit('data', bodyBuffer);
-      req.emit('end');
-    });
-  } else {
-    queueMicrotask(() => {
-      req.emit('end');
-    });
+function normalizeNodeHandler(candidate: unknown): NodeRequestHandler {
+  if (typeof candidate === 'function') return candidate as NodeRequestHandler;
+
+  if (candidate && typeof candidate === 'object' && 'handle' in candidate) {
+    const handle = (candidate as { handle: NodeRequestHandler }).handle;
+    if (typeof handle === 'function') return handle.bind(candidate);
   }
 
-  return { req, res, responsePromise };
+  throw new Error(
+    'Unsupported server export shape. Expected function or object with handle(req,res).',
+  );
 }
 
 function shouldBase64Encode(contentType?: string): boolean {
-  if (!contentType) {
-    return false;
-  }
-
+  if (!contentType) return false;
   const textTypes = [
     'text/',
     'application/json',
@@ -438,71 +395,5 @@ function shouldBase64Encode(contentType?: string): boolean {
     'application/javascript',
     'application/x-www-form-urlencoded',
   ];
-
   return !textTypes.some((type) => contentType.includes(type));
-}
-
-function tryParseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    try {
-      return parseQuery(value);
-    } catch {
-      return value;
-    }
-  }
-}
-
-function shouldCacheRequest(event: APIGatewayProxyEventV2): boolean {
-  const method = event.requestContext.http.method.toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    return false;
-  }
-
-  if (event.rawPath.startsWith('/api/')) {
-    return false;
-  }
-
-  const cacheControl = (event.headers['cache-control'] || '').toLowerCase();
-  if (cacheControl.includes('no-cache') || cacheControl.includes('no-store')) {
-    return false;
-  }
-
-  return true;
-}
-
-function shouldCacheResponse(response: APIGatewayProxyResultV2): boolean {
-  if (response.statusCode !== 200) {
-    return false;
-  }
-
-  const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
-  return contentType.includes('text/html');
-}
-
-function createCacheKey(event: APIGatewayProxyEventV2): string {
-  const vary = [
-    event.headers['accept-language'] || '',
-    event.headers['accept-encoding'] || '',
-    event.headers['x-forwarded-host'] || event.headers.host || '',
-  ].join('|');
-
-  const hash = createHash('sha256')
-    .update(`${event.requestContext.http.method}:${event.rawPath}?${event.rawQueryString}:${vary}`)
-    .digest('hex');
-
-  return `html:${hash}`;
-}
-
-function toStringHeaders(
-  headers: Record<string, string | number | boolean | undefined>,
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (value !== undefined) {
-      result[key] = String(value);
-    }
-  }
-  return result;
 }
