@@ -208,6 +208,7 @@ resource "yandex_function" "server" {
       BUILD_ID              = local.build_id
       NODE_ENV              = "production"
       ASSETS_BUCKET         = local.assets_bucket
+      NG_ALLOWED_HOSTS      = var.domain_name
       YDB_ENDPOINT          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].ydb_full_endpoint : ""
       YDB_DATABASE          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].database_path : ""
       YDB_ACCESS_KEY_ID     = var.enable_response_cache ? yandex_iam_service_account_static_access_key.ydb[0].access_key : ""
