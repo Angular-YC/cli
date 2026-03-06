@@ -182,6 +182,12 @@ resource "yandex_resourcemanager_folder_iam_member" "lockbox_payload_viewer" {
   member    = "serviceAccount:${yandex_iam_service_account.functions.id}"
 }
 
+resource "yandex_resourcemanager_folder_iam_member" "ydb_editor_functions" {
+  folder_id = data.yandex_client_config.current.folder_id
+  role      = "ydb.editor"
+  member    = "serviceAccount:${yandex_iam_service_account.functions.id}"
+}
+
 # Server function (SSR/API)
 resource "yandex_function" "server" {
   count = local.manifest.capabilities.rendering.needsServer ? 1 : 0
@@ -199,6 +205,7 @@ resource "yandex_function" "server" {
     yandex_resourcemanager_folder_iam_member.storage_viewer,
     yandex_resourcemanager_folder_iam_member.storage_editor,
     yandex_resourcemanager_folder_iam_member.lockbox_payload_viewer,
+    yandex_resourcemanager_folder_iam_member.ydb_editor_functions,
   ]
 
   # Environment variables
