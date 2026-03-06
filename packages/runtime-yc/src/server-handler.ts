@@ -180,23 +180,36 @@ export function createServerHandler(options: HandlerOptions) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (globalThis as any).fetch = function tracedFetch(input: any, init?: any) {
         fetchCount++;
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url ?? String(input);
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : (input?.url ?? String(input));
         const method = init?.method || 'GET';
-        console.log(`[Server] fetch #${fetchCount}: ${method} ${url} (+${Date.now() - startTime}ms)`);
+        console.log(
+          `[Server] fetch #${fetchCount}: ${method} ${url} (+${Date.now() - startTime}ms)`,
+        );
         return originalFetch(input, init).then(
           (resp) => {
-            console.log(`[Server] fetch #${fetchCount} done: ${resp.status} (+${Date.now() - startTime}ms)`);
+            console.log(
+              `[Server] fetch #${fetchCount} done: ${resp.status} (+${Date.now() - startTime}ms)`,
+            );
             return resp;
           },
           (err) => {
-            console.log(`[Server] fetch #${fetchCount} error: ${err?.message || err} (+${Date.now() - startTime}ms)`);
+            console.log(
+              `[Server] fetch #${fetchCount} error: ${err?.message || err} (+${Date.now() - startTime}ms)`,
+            );
             throw err;
           },
         );
       };
 
       const writeTimer = setInterval(() => {
-        console.log(`[Server] Still waiting for response... (+${Date.now() - startTime}ms, fetches: ${fetchCount})`);
+        console.log(
+          `[Server] Still waiting for response... (+${Date.now() - startTime}ms, fetches: ${fetchCount})`,
+        );
       }, 5000);
 
       try {
@@ -208,7 +221,9 @@ export function createServerHandler(options: HandlerOptions) {
             resolve();
           });
           res.on('error', (err) => {
-            console.log(`[Server] res.error event: ${err?.message || err} (+${Date.now() - startTime}ms)`);
+            console.log(
+              `[Server] res.error event: ${err?.message || err} (+${Date.now() - startTime}ms)`,
+            );
             reject(err);
           });
 
