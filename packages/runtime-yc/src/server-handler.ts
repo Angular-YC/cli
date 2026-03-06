@@ -175,16 +175,66 @@ export function createServerHandler(options: HandlerOptions) {
 
       if (debug) console.log(`[Server] Calling handler...`);
 
-      await new Promise<void>((resolve, reject) => {
-        const maybePromise = appHandler!(req, res);
+      const originalFetch = globalThis.fetch;
+      let fetchCount = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).fetch = function tracedFetch(input: any, init?: any) {
+        fetchCount++;
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : (input?.url ?? String(input));
+        const method = init?.method || 'GET';
+        console.log(
+          `[Server] fetch #${fetchCount}: ${method} ${url} (+${Date.now() - startTime}ms)`,
+        );
+        return originalFetch(input, init).then(
+          (resp) => {
+            console.log(
+              `[Server] fetch #${fetchCount} done: ${resp.status} (+${Date.now() - startTime}ms)`,
+            );
+            return resp;
+          },
+          (err) => {
+            console.log(
+              `[Server] fetch #${fetchCount} error: ${err?.message || err} (+${Date.now() - startTime}ms)`,
+            );
+            throw err;
+          },
+        );
+      };
 
-        res.on('finish', resolve);
-        res.on('error', reject);
+      const writeTimer = setInterval(() => {
+        console.log(
+          `[Server] Still waiting for response... (+${Date.now() - startTime}ms, fetches: ${fetchCount})`,
+        );
+      }, 5000);
 
-        if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-          (maybePromise as Promise<unknown>).catch(reject);
-        }
-      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const maybePromise = appHandler!(req, res);
+
+          res.on('finish', () => {
+            console.log(`[Server] res.finish event (+${Date.now() - startTime}ms)`);
+            resolve();
+          });
+          res.on('error', (err) => {
+            console.log(
+              `[Server] res.error event: ${err?.message || err} (+${Date.now() - startTime}ms)`,
+            );
+            reject(err);
+          });
+
+          if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+            (maybePromise as Promise<unknown>).catch(reject);
+          }
+        });
+      } finally {
+        clearInterval(writeTimer);
+        globalThis.fetch = originalFetch;
+      }
 
       if (debug) console.log(`[Server] Handler done (${Date.now() - startTime}ms)`);
 
