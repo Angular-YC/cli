@@ -346,7 +346,11 @@ function handleViaNode(
     const origWrite = res.write.bind(res);
     res.write = function (chunk: unknown, ...args: unknown[]) {
       if (chunk) {
-        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+        const buf = Buffer.isBuffer(chunk)
+          ? chunk
+          : chunk instanceof Uint8Array
+            ? Buffer.from(chunk)
+            : Buffer.from(String(chunk));
         chunks.push(buf);
         console.log(`[Server:Node] write(${buf.length} bytes) (+${Date.now() - nodeStart}ms)`);
       }
@@ -355,7 +359,14 @@ function handleViaNode(
 
     const origEnd = res.end.bind(res);
     res.end = function (chunk?: unknown, ...args: unknown[]) {
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      if (chunk)
+        chunks.push(
+          Buffer.isBuffer(chunk)
+            ? chunk
+            : chunk instanceof Uint8Array
+              ? Buffer.from(chunk)
+              : Buffer.from(String(chunk)),
+        );
 
       const body = Buffer.concat(chunks);
       const ct = resHeaders['content-type'];
