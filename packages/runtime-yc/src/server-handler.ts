@@ -156,17 +156,18 @@ export function createServerHandler(options: HandlerOptions) {
       await initialize();
       console.log(`[Server] Initialized (+${Date.now() - startTime}ms)`);
 
-      // API routes → Node handler (Express) directly, skip Angular SSR.
-      if (urlPath.startsWith('/api/') && nodeHandler) {
-        console.log(`[Server] Routing to Node handler (API route)`);
+      // Primary: Node handler (Express app with AngularNodeAppEngine).
+      // Handles SSR, static files, and API routes with full middleware.
+      if (nodeHandler) {
+        console.log(`[Server] Routing to Node handler`);
         const result = await handleViaNode(nodeHandler, event, trustProxy);
         console.log(
-          `[Server] <-- ${result.statusCode} ${method} ${urlPath} (+${Date.now() - startTime}ms)`,
+          `[Server] <-- ${result.statusCode} ${method} ${urlPath} (body: ${result.body?.length ?? 0} bytes, +${Date.now() - startTime}ms)`,
         );
         return result;
       }
 
-      // SSR pages → AngularAppEngine with Web Request/Response.
+      // Fallback: AngularAppEngine directly (no Express, limited SSR).
       if (engine) {
         const webRequest = buildWebRequest(event, trustProxy);
         console.log(`[Server] Calling engine.handle() for ${webRequest.url}`);
@@ -180,22 +181,12 @@ export function createServerHandler(options: HandlerOptions) {
         if (response) {
           const result = await toYCResponse(response);
           console.log(
-            `[Server] <-- ${result.statusCode} ${method} ${urlPath} (body: ${result.body?.length ?? 0} bytes, base64: ${result.isBase64Encoded}, +${Date.now() - startTime}ms)`,
+            `[Server] <-- ${result.statusCode} ${method} ${urlPath} (body: ${result.body?.length ?? 0} bytes, +${Date.now() - startTime}ms)`,
           );
           return result;
         }
 
-        console.log(`[Server] Engine returned null, trying fallback`);
-      }
-
-      // Fallback: Node handler for anything the engine didn't match.
-      if (nodeHandler) {
-        console.log(`[Server] Routing to Node handler (fallback)`);
-        const result = await handleViaNode(nodeHandler, event, trustProxy);
-        console.log(
-          `[Server] <-- ${result.statusCode} ${method} ${urlPath} (+${Date.now() - startTime}ms)`,
-        );
-        return result;
+        console.log(`[Server] Engine returned null`);
       }
 
       console.log(`[Server] <-- 404 ${method} ${urlPath} (no handler matched)`);
