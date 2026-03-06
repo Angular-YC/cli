@@ -91,22 +91,30 @@ export function createServerHandler(options: HandlerOptions) {
   let nodeHandler: NodeRequestHandler | null = null;
 
   const initialize = async (): Promise<void> => {
-    if (engine || nodeHandler) return;
+    if (engine || nodeHandler) {
+      console.log('[Server] Already initialized, skipping');
+      return;
+    }
 
+    const initStart = Date.now();
     const modulePath = resolveServerModule(dir, serverModuleCandidates);
-    if (debug) console.log(`[Server] Loading module: ${modulePath}`);
+    console.log(`[Server] Loading module: ${modulePath}`);
     const imported = await import(modulePath);
-    if (debug) console.log(`[Server] Module exports: ${Object.keys(imported).join(', ')}`);
+    console.log(
+      `[Server] Module loaded (+${Date.now() - initStart}ms), exports: ${Object.keys(imported).join(', ')}`,
+    );
 
     // Prefer AngularAppEngine — works with Web Request/Response, no Node shim needed.
     const EngineClass = imported.AngularAppEngine;
     if (typeof EngineClass === 'function') {
       try {
         engine = new EngineClass() as AngularEngine;
-        if (debug) console.log('[Server] Using AngularAppEngine (Web API path)');
-      } catch {
-        if (debug) console.log('[Server] AngularAppEngine instantiation failed, using Node path');
+        console.log(`[Server] AngularAppEngine instantiated (+${Date.now() - initStart}ms)`);
+      } catch (err) {
+        console.error('[Server] AngularAppEngine instantiation failed, falling back to Node:', err);
       }
+    } else {
+      console.log('[Server] No AngularAppEngine export found, will use Node handler');
     }
 
     // Node handler as fallback (API routes, or full Express app if no engine).
@@ -120,8 +128,14 @@ export function createServerHandler(options: HandlerOptions) {
 
     if (candidate) {
       nodeHandler = normalizeNodeHandler(candidate);
-      if (debug) console.log(`[Server] Node handler resolved (type: ${typeof candidate})`);
+      console.log(`[Server] Node handler resolved (type: ${typeof candidate})`);
+    } else {
+      console.log('[Server] No Node handler found');
     }
+
+    console.log(
+      `[Server] Init complete (+${Date.now() - initStart}ms): engine=${!!engine}, nodeHandler=${!!nodeHandler}`,
+    );
 
     if (!engine && !nodeHandler) {
       throw new Error(`Could not find a usable server export in ${modulePath}`);
@@ -130,39 +144,61 @@ export function createServerHandler(options: HandlerOptions) {
 
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
     const startTime = Date.now();
+    const method = event.requestContext?.http?.method || 'GET';
+    const urlPath = event.rawPath || '/';
+    const qs = event.rawQueryString ? `?${event.rawQueryString}` : '';
+    const requestId = event.requestContext?.requestId || 'unknown';
+
+    console.log(`[Server] --> ${method} ${urlPath}${qs} (reqId: ${requestId})`);
+    if (debug) console.log(`[Server] Headers: ${JSON.stringify(event.headers)}`);
+
     try {
       await initialize();
-
-      const method = event.requestContext?.http?.method || 'GET';
-      const urlPath = event.rawPath || '/';
-      if (debug) {
-        console.log(`[Server] ${method} ${urlPath} (+${Date.now() - startTime}ms)`);
-      }
+      console.log(`[Server] Initialized (+${Date.now() - startTime}ms)`);
 
       // API routes → Node handler (Express) directly, skip Angular SSR.
       if (urlPath.startsWith('/api/') && nodeHandler) {
-        if (debug) console.log(`[Server] API route → Node handler`);
-        return await handleViaNode(nodeHandler, event, trustProxy);
+        console.log(`[Server] Routing to Node handler (API route)`);
+        const result = await handleViaNode(nodeHandler, event, trustProxy);
+        console.log(
+          `[Server] <-- ${result.statusCode} ${method} ${urlPath} (+${Date.now() - startTime}ms)`,
+        );
+        return result;
       }
 
       // SSR pages → AngularAppEngine with Web Request/Response.
       if (engine) {
         const webRequest = buildWebRequest(event, trustProxy);
+        console.log(`[Server] Calling engine.handle() for ${webRequest.url}`);
+
+        const ssrStart = Date.now();
         const response = await engine.handle(webRequest);
+        console.log(
+          `[Server] engine.handle() returned: ${response ? response.status : 'null'} (+${Date.now() - ssrStart}ms SSR, +${Date.now() - startTime}ms total)`,
+        );
 
         if (response) {
           const result = await toYCResponse(response);
-          if (debug) console.log(`[Server] ${result.statusCode} (+${Date.now() - startTime}ms)`);
+          console.log(
+            `[Server] <-- ${result.statusCode} ${method} ${urlPath} (body: ${result.body?.length ?? 0} bytes, base64: ${result.isBase64Encoded}, +${Date.now() - startTime}ms)`,
+          );
           return result;
         }
+
+        console.log(`[Server] Engine returned null, trying fallback`);
       }
 
       // Fallback: Node handler for anything the engine didn't match.
       if (nodeHandler) {
-        if (debug) console.log(`[Server] Fallback → Node handler`);
-        return await handleViaNode(nodeHandler, event, trustProxy);
+        console.log(`[Server] Routing to Node handler (fallback)`);
+        const result = await handleViaNode(nodeHandler, event, trustProxy);
+        console.log(
+          `[Server] <-- ${result.statusCode} ${method} ${urlPath} (+${Date.now() - startTime}ms)`,
+        );
+        return result;
       }
 
+      console.log(`[Server] <-- 404 ${method} ${urlPath} (no handler matched)`);
       return {
         statusCode: 404,
         headers: { 'content-type': 'text/plain' },
@@ -170,7 +206,10 @@ export function createServerHandler(options: HandlerOptions) {
         isBase64Encoded: false,
       };
     } catch (error) {
-      console.error('[Server] Error handling request:', error);
+      console.error(
+        `[Server] <-- 500 ${method} ${urlPath} (+${Date.now() - startTime}ms) Error:`,
+        error,
+      );
       return {
         statusCode: 500,
         headers: { 'content-type': 'text/plain' },
@@ -198,6 +237,10 @@ function buildWebRequest(event: APIGatewayProxyEventV2, trustProxy: boolean): Re
   const qs = event.rawQueryString ? `?${event.rawQueryString}` : '';
   const url = `${proto}://${host}${urlPath}${qs}`;
 
+  console.log(
+    `[Server] buildWebRequest: url=${url}, host=${host}, proto=${proto}, trustProxy=${trustProxy}`,
+  );
+
   const reqHeaders = new Headers();
   for (const [key, value] of Object.entries(headers)) {
     if (value != null) reqHeaders.set(key, value);
@@ -212,6 +255,9 @@ function buildWebRequest(event: APIGatewayProxyEventV2, trustProxy: boolean): Re
   let body: string | Buffer | undefined;
   if (hasBody) {
     body = event.isBase64Encoded ? Buffer.from(event.body!, 'base64') : event.body!;
+    console.log(
+      `[Server] buildWebRequest: body present (${typeof body === 'string' ? body.length : body.length} bytes, base64=${event.isBase64Encoded})`,
+    );
   }
 
   return new Request(url, { method, headers: reqHeaders, body });
@@ -258,6 +304,11 @@ function handleViaNode(
   event: APIGatewayProxyEventV2,
   trustProxy: boolean,
 ): Promise<APIGatewayProxyResultV2> {
+  const nodeStart = Date.now();
+  console.log(
+    `[Server:Node] Starting handler for ${event.requestContext.http.method} ${event.rawPath}`,
+  );
+
   return new Promise((resolve, reject) => {
     const req = new IncomingMessage(null as never);
     req.method = event.requestContext.http.method;
@@ -290,6 +341,7 @@ function handleViaNode(
     const origWriteHead = res.writeHead.bind(res);
     res.writeHead = function (code: number, ...args: unknown[]) {
       statusCode = code;
+      console.log(`[Server:Node] writeHead(${code}) (+${Date.now() - nodeStart}ms)`);
       return origWriteHead(code, ...(args as []));
     };
 
@@ -302,7 +354,11 @@ function handleViaNode(
 
     const origWrite = res.write.bind(res);
     res.write = function (chunk: unknown, ...args: unknown[]) {
-      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      if (chunk) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+        chunks.push(buf);
+        console.log(`[Server:Node] write(${buf.length} bytes) (+${Date.now() - nodeStart}ms)`);
+      }
       return origWrite(chunk as never, ...(args as []));
     };
 
@@ -313,6 +369,10 @@ function handleViaNode(
       const body = Buffer.concat(chunks);
       const ct = resHeaders['content-type'];
       const isBase64 = shouldBase64Encode(Array.isArray(ct) ? ct[0] : ct);
+
+      console.log(
+        `[Server:Node] end() status=${statusCode}, body=${body.length} bytes, content-type=${ct || 'none'} (+${Date.now() - nodeStart}ms)`,
+      );
 
       const result: APIGatewayProxyResultV2 = {
         statusCode,
@@ -339,13 +399,19 @@ function handleViaNode(
       return origEnd(chunk as never, ...(args as []));
     };
 
-    res.on('error', reject);
+    res.on('error', (err) => {
+      console.error(
+        `[Server:Node] res error: ${err?.message || err} (+${Date.now() - nodeStart}ms)`,
+      );
+      reject(err);
+    });
 
     // Emit body asynchronously (matches Express expectations).
     if (event.body) {
       const buf = event.isBase64Encoded
         ? Buffer.from(event.body, 'base64')
         : Buffer.from(event.body, 'utf-8');
+      console.log(`[Server:Node] Emitting body (${buf.length} bytes)`);
       queueMicrotask(() => {
         req.emit('data', buf);
         req.emit('end');
@@ -354,9 +420,18 @@ function handleViaNode(
       queueMicrotask(() => req.emit('end'));
     }
 
+    console.log(`[Server:Node] Calling handler function...`);
     const maybePromise = handler(req, res);
     if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-      (maybePromise as Promise<unknown>).catch(reject);
+      console.log(`[Server:Node] Handler returned a promise`);
+      (maybePromise as Promise<unknown>).catch((err) => {
+        console.error(
+          `[Server:Node] Handler promise rejected: ${err?.message || err} (+${Date.now() - nodeStart}ms)`,
+        );
+        reject(err);
+      });
+    } else {
+      console.log(`[Server:Node] Handler returned synchronously`);
     }
   });
 }
