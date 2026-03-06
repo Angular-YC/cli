@@ -79,6 +79,7 @@ export function createServerHandler(options: HandlerOptions) {
     responseCache: cacheOptions = { enabled: false, driver: 'memory', defaultTtlSeconds: 60 },
   } = options;
 
+  const debug = Boolean(process.env.AYC_DEBUG);
   let appHandler: NodeRequestHandler | null = null;
   let responseCache: ResponseCache | null = null;
 
@@ -117,7 +118,9 @@ export function createServerHandler(options: HandlerOptions) {
     }
 
     const modulePath = resolveServerModule(dir, serverModuleCandidates);
+    if (debug) console.log(`[Server] Loading module: ${modulePath}`);
     const imported = await import(modulePath);
+    if (debug) console.log(`[Server] Module exports: ${Object.keys(imported).join(', ')}`);
 
     const candidate =
       (handlerExportName ? imported[handlerExportName] : undefined) ||
@@ -131,15 +134,26 @@ export function createServerHandler(options: HandlerOptions) {
       throw new Error(`Could not find server export in ${modulePath}`);
     }
 
+    if (debug) console.log(`[Server] Handler resolved (type: ${typeof candidate})`);
     appHandler = normalizeNodeHandler(candidate);
   };
 
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
     try {
+      const startTime = Date.now();
+      if (debug) {
+        console.log(
+          `[Server] ${event.requestContext?.http?.method || '?'} ${event.rawPath || '?'}${event.rawQueryString ? '?' + event.rawQueryString : ''}`,
+        );
+        console.log(`[Server] Headers: ${JSON.stringify(event.headers)}`);
+      }
+
       await initialize();
       if (!appHandler || !responseCache) {
         throw new Error('Server runtime not initialized');
       }
+
+      if (debug) console.log(`[Server] Init done (${Date.now() - startTime}ms)`);
 
       const cacheableRequest = shouldCacheRequest(event);
       const cacheKey = cacheableRequest ? createCacheKey(event) : null;
@@ -147,6 +161,7 @@ export function createServerHandler(options: HandlerOptions) {
       if (cacheableRequest && cacheKey) {
         const cached = await responseCache.get(cacheKey);
         if (cached) {
+          if (debug) console.log(`[Server] Cache hit (${Date.now() - startTime}ms)`);
           return {
             statusCode: cached.statusCode,
             headers: cached.headers,
@@ -158,6 +173,8 @@ export function createServerHandler(options: HandlerOptions) {
 
       const { req, res, responsePromise } = createNodeRequestResponse(event, trustProxy);
 
+      if (debug) console.log(`[Server] Calling handler...`);
+
       await new Promise<void>((resolve, reject) => {
         const maybePromise = appHandler!(req, res);
 
@@ -168,6 +185,8 @@ export function createServerHandler(options: HandlerOptions) {
           (maybePromise as Promise<unknown>).catch(reject);
         }
       });
+
+      if (debug) console.log(`[Server] Handler done (${Date.now() - startTime}ms)`);
 
       const result = await responsePromise;
 
@@ -186,6 +205,8 @@ export function createServerHandler(options: HandlerOptions) {
         );
       }
 
+      if (debug)
+        console.log(`[Server] Response: ${result.statusCode} (${Date.now() - startTime}ms)`);
       return result;
     } catch (error) {
       console.error('[Server] Error handling request:', error);
