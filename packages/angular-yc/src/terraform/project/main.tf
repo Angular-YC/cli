@@ -352,8 +352,6 @@ resource "yandex_cdn_resource" "main" {
     cors                   = var.allowed_origins
     gzip_on                = true
   }
-
-  labels = local.common_labels
 }
 
 # ============================================================================
