@@ -48,7 +48,7 @@ jobs:
           echo "Changed files between $BEFORE_SHA and $AFTER_SHA:"
           echo "$CHANGED_FILES"
 
-          if echo "$CHANGED_FILES" | grep -Eq '^packages/(angular-yc|runtime-yc)/(src/|package\.json|tsconfig\.json)'; then
+          if echo "$CHANGED_FILES" | grep -Eq '^packages/(cli|runtime)/(src/|package\.json|tsconfig\.json)'; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -80,7 +80,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          PACKAGE_VERSION="$(node -p "require('./packages/angular-yc/package.json').version")"
+          PACKAGE_VERSION="$(node -p "require('./packages/cli/package.json').version")"
           LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
 
           if [ -n "$LATEST_TAG" ]; then
@@ -107,7 +107,7 @@ jobs:
           if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://registry.npmjs.org > /dev/null 2>&1; then
             echo "$PACKAGE_NAME@$VERSION already exists in npm, skipping publish"
           else
-            cd packages/angular-yc
+            cd packages/cli
             npm version "$VERSION" --no-git-tag-version --allow-same-version
             npm publish --access public --tag latest
             cd ../..
@@ -123,7 +123,7 @@ jobs:
           if npm view "$PACKAGE_NAME@$VERSION" version --registry=https://registry.npmjs.org > /dev/null 2>&1; then
             echo "$PACKAGE_NAME@$VERSION already exists in npm, skipping publish"
           else
-            cd packages/runtime-yc
+            cd packages/runtime
             npm version "$VERSION" --no-git-tag-version --allow-same-version
             npm publish --access public --tag latest
             cd ../..

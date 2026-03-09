@@ -2,8 +2,8 @@
 
 TypeScript pnpm workspace containing:
 
-- `@angular-yc/cli` (`packages/angular-yc`)
-- `@angular-yc/runtime` (`packages/runtime-yc`)
+- `@angular-yc/cli` (`packages/cli`)
+- `@angular-yc/runtime` (`packages/runtime`)
 
 ## Commands
 
