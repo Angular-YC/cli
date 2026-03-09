@@ -1,5 +1,4 @@
-import pkg from 'ydb-sdk';
-const {
+import {
   Driver,
   getSACredentialsFromJson,
   IamAuthService,
@@ -9,12 +8,8 @@ const {
   Column,
   Types,
   TypedValues,
-} = pkg;
-type Session = import('ydb-sdk').Session;
-type Driver = InstanceType<typeof Driver>;
-type IamAuthService = InstanceType<typeof IamAuthService>;
-type StaticCredentialsAuthService = InstanceType<typeof StaticCredentialsAuthService>;
-type MetadataAuthService = InstanceType<typeof MetadataAuthService>;
+  type Session,
+} from 'ydb-sdk';
 import {
   S3Client,
   GetObjectCommand,
