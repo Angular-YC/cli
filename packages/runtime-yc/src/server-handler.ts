@@ -361,12 +361,18 @@ function handleViaNode(
       const ct = resHeaders['content-type'];
       const isBase64 = shouldBase64Encode(Array.isArray(ct) ? ct[0] : ct);
 
+      // Express sets res.statusCode directly (e.g. res.status(400)) without
+      // calling writeHead(). Since our end() override skips the original
+      // ServerResponse.end(), the implicit writeHead() never fires.
+      // Read res.statusCode as the authoritative source.
+      const finalStatusCode = res.statusCode || statusCode;
+
       console.log(
-        `[Server:Node] end() status=${statusCode}, body=${body.length} bytes, content-type=${ct || 'none'} (+${Date.now() - nodeStart}ms)`,
+        `[Server:Node] end() status=${finalStatusCode}, body=${body.length} bytes, content-type=${ct || 'none'} (+${Date.now() - nodeStart}ms)`,
       );
 
       const result: APIGatewayProxyResultV2 = {
-        statusCode,
+        statusCode: finalStatusCode,
         headers: {},
         body: isBase64 ? body.toString('base64') : body.toString('utf-8'),
         isBase64Encoded: isBase64,
@@ -397,18 +403,21 @@ function handleViaNode(
       reject(err);
     });
 
-    // Emit body asynchronously (matches Express expectations).
+    // Push body into the Readable stream's internal buffer synchronously.
+    // Using push() instead of emit('data') avoids a race condition:
+    // queueMicrotask fires before async middleware (e.g. store.ready())
+    // yields back to express.json(), so the events would be lost.
+    // With push(), data is buffered and delivered when express.json()
+    // later attaches its 'data' listener.
     if (event.body) {
       const buf = event.isBase64Encoded
         ? Buffer.from(event.body, 'base64')
         : Buffer.from(event.body, 'utf-8');
-      console.log(`[Server:Node] Emitting body (${buf.length} bytes)`);
-      queueMicrotask(() => {
-        req.emit('data', buf);
-        req.emit('end');
-      });
+      console.log(`[Server:Node] Pushing body (${buf.length} bytes)`);
+      req.push(buf);
+      req.push(null);
     } else {
-      queueMicrotask(() => req.emit('end'));
+      req.push(null);
     }
 
     console.log(`[Server:Node] Calling handler function...`);
