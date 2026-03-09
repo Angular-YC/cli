@@ -319,7 +319,7 @@ function handleViaNode(
         : event.requestContext.http.sourceIp;
 
     Object.defineProperty(req, 'socket', {
-      value: { remoteAddress: ip },
+      value: { remoteAddress: ip, readable: true },
       writable: true,
     });
 
