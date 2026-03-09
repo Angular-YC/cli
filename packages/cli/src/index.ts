@@ -536,7 +536,9 @@ program
             await fs.writeJson(manifestPath, manifest, { spaces: 2 });
             if (options.verbose) {
               console.log(
-                chalk.gray(`  Injected ${Object.keys(customEnv).length} custom env vars: ${Object.keys(customEnv).join(', ')}`),
+                chalk.gray(
+                  `  Injected ${Object.keys(customEnv).length} custom env vars: ${Object.keys(customEnv).join(', ')}`,
+                ),
               );
             }
           }
