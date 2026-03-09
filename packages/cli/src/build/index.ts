@@ -393,7 +393,10 @@ export const handler = createImageHandler({
     const pkgJsonPath = path.join(pkgDir, 'package.json');
     if (await fs.pathExists(pkgJsonPath)) {
       const pkgJson = await fs.readJson(pkgJsonPath);
-      const deps = Object.keys(pkgJson.dependencies || {});
+      const deps = [
+        ...Object.keys(pkgJson.dependencies || {}),
+        ...Object.keys(pkgJson.peerDependencies || {}),
+      ];
       for (const transitiveDep of deps) {
         await this.copyPackageWithDeps(projectPath, nodeModulesDest, transitiveDep, visited);
       }
