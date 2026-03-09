@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import fs from 'fs-extra';
 import path from 'path';
 import { Analyzer } from './analyze/index.js';
 import { Builder } from './build/index.js';
@@ -86,6 +87,18 @@ function collectTfVarsFromConfig(config: Record<string, unknown>): Record<string
     result[key.replace(/-/g, '_')] = String(value);
   }
 
+  return result;
+}
+
+/** Collect AYC_ENV_ prefixed vars and strip the prefix to get Cloud Function env vars. */
+function collectCustomEnvVars(env: NodeJS.ProcessEnv): Record<string, string> {
+  const PREFIX = 'AYC_ENV_';
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith(PREFIX) || value === undefined) continue;
+    const envKey = key.slice(PREFIX.length);
+    if (envKey) result[envKey] = value;
+  }
   return result;
 }
 
@@ -508,6 +521,26 @@ program
               getConfigBoolean(mergedConfig, 'skipBuild'),
             ) || false,
         });
+
+        // Inject AYC_ENV_ prefixed variables into the manifest's server.env
+        // so they become Cloud Function environment variables.
+        const manifestPath = path.join(outputDir, 'deploy.manifest.json');
+        const customEnv = collectCustomEnvVars(env);
+        if (Object.keys(customEnv).length > 0) {
+          const manifest = await fs.readJson(manifestPath);
+          if (manifest.artifacts?.server) {
+            manifest.artifacts.server.env = {
+              ...manifest.artifacts.server.env,
+              ...customEnv,
+            };
+            await fs.writeJson(manifestPath, manifest, { spaces: 2 });
+            if (options.verbose) {
+              console.log(
+                chalk.gray(`  Injected ${Object.keys(customEnv).length} custom env vars: ${Object.keys(customEnv).join(', ')}`),
+              );
+            }
+          }
+        }
 
         const outputs = await terraform.readOutputs();
         const explicitAssetsBucket = firstDefined(
