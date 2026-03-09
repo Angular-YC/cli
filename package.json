@@ -14,8 +14,8 @@
     "ci": "pnpm lint && pnpm test && pnpm build",
     "dev": "pnpm -r --parallel dev",
     "clean": "pnpm -r exec rm -rf dist node_modules && rm -rf node_modules",
-    "cli": "node packages/angular-yc/dist/index.js",
-    "cli:dev": "tsx packages/angular-yc/src/index.ts",
+    "cli": "node packages/cli/dist/index.js",
+    "cli:dev": "tsx packages/cli/src/index.ts",
     "setup": "pnpm install && pnpm build"
   },
   "devDependencies": {

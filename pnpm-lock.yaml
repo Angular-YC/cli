@@ -36,7 +36,7 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.35)
 
-  packages/angular-yc:
+  packages/cli:
     dependencies:
       '@angular-yc/runtime':
         specifier: ^1.0.0
@@ -100,7 +100,7 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.35)
 
-  packages/runtime-yc:
+  packages/runtime:
     dependencies:
       '@aws-sdk/client-s3':
         specifier: ^3.490.0

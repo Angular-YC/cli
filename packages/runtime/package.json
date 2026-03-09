@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Angular-YC/cli.git",
-    "directory": "packages/runtime-yc"
+    "directory": "packages/runtime"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
