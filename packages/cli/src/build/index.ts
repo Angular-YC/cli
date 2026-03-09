@@ -83,7 +83,7 @@ export class Builder {
 
       if (capabilities.rendering.needsServer) {
         spinner.start('Packaging server function...');
-        await this.packageServer(projectPath, artifactsDir, capabilities, outputs);
+        await this.packageServer(artifactsDir, capabilities, outputs);
         spinner.succeed('Server function packaged');
       }
 
@@ -223,7 +223,6 @@ export class Builder {
   }
 
   private async packageServer(
-    projectPath: string,
     artifactsDir: string,
     capabilities: DeployManifest['capabilities'],
     outputs: BuildOutputs,
@@ -258,7 +257,6 @@ export const handler = createServerHandler({
     await this.bundleWithEsbuild(tempEntryPath, path.join(serverDir, 'index.js'), [
       'sharp',
       '@img/*',
-      '@yandex-cloud/*',
     ]);
     await fs.remove(tempEntryPath);
 
@@ -269,8 +267,6 @@ export const handler = createServerHandler({
     if (await fs.pathExists(outputs.browserOutput)) {
       await fs.copy(outputs.browserOutput, path.join(serverDir, 'browser'));
     }
-
-    await this.copyServerDependencies(projectPath, serverDir);
 
     await this.createZipArchive(serverDir, path.join(artifactsDir, 'server.zip'));
     await fs.remove(serverDir);
@@ -342,63 +338,6 @@ export const handler = createImageHandler({
         await fs.copy(depDir, path.join(nodeModulesDest, dep), { dereference: true });
       } catch {
         // Platform-specific binary not available (expected on non-matching platforms)
-      }
-    }
-  }
-
-  /**
-   * Copy native/dynamic dependencies that can't be bundled by esbuild.
-   * Reads `externalDependencies` from angular.json build options, then
-   * copies each package (and its transitive deps) from the project's
-   * node_modules into the server zip.
-   */
-  private async copyServerDependencies(projectPath: string, serverDir: string): Promise<void> {
-    const angularJsonPath = path.join(projectPath, 'angular.json');
-    if (!(await fs.pathExists(angularJsonPath))) return;
-
-    const workspace = await fs.readJson(angularJsonPath);
-    const projectName = workspace.defaultProject || Object.keys(workspace.projects || {})[0];
-    if (!projectName) return;
-
-    const buildOptions = workspace.projects?.[projectName]?.architect?.build?.options || {};
-    const externalDeps: string[] = buildOptions.externalDependencies || [];
-    if (externalDeps.length === 0) return;
-
-    const nodeModulesDest = path.join(serverDir, 'node_modules');
-
-    for (const dep of externalDeps) {
-      await this.copyPackageWithDeps(projectPath, nodeModulesDest, dep);
-    }
-  }
-
-  private async copyPackageWithDeps(
-    projectPath: string,
-    nodeModulesDest: string,
-    packageName: string,
-    visited: Set<string> = new Set(),
-  ): Promise<void> {
-    if (visited.has(packageName)) return;
-    visited.add(packageName);
-
-    const pkgDir = path.join(projectPath, 'node_modules', packageName);
-    if (!(await fs.pathExists(pkgDir))) return;
-
-    const destDir = path.join(nodeModulesDest, packageName);
-    if (packageName.startsWith('@')) {
-      await fs.ensureDir(path.dirname(destDir));
-    }
-    await fs.ensureDir(nodeModulesDest);
-    await fs.copy(pkgDir, destDir, { dereference: true });
-
-    const pkgJsonPath = path.join(pkgDir, 'package.json');
-    if (await fs.pathExists(pkgJsonPath)) {
-      const pkgJson = await fs.readJson(pkgJsonPath);
-      const deps = [
-        ...Object.keys(pkgJson.dependencies || {}),
-        ...Object.keys(pkgJson.peerDependencies || {}),
-      ];
-      for (const transitiveDep of deps) {
-        await this.copyPackageWithDeps(projectPath, nodeModulesDest, transitiveDep, visited);
       }
     }
   }
