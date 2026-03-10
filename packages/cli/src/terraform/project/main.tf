@@ -217,10 +217,10 @@ resource "yandex_function" "server" {
       ASSETS_BUCKET         = local.assets_bucket
       NG_ALLOWED_HOSTS      = var.domain_name
       AYC_DEBUG             = var.env != "production" ? "1" : "0"
-      YDB_ENDPOINT          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].ydb_full_endpoint : "disabled"
-      YDB_DATABASE          = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].database_path : "disabled"
-      YDB_ACCESS_KEY_ID     = var.enable_response_cache ? yandex_iam_service_account_static_access_key.ydb[0].access_key : "disabled"
-      YDB_SECRET_KEY        = var.enable_response_cache ? yandex_iam_service_account_static_access_key.ydb[0].secret_key : "disabled"
+      AYC_CACHE_YDB_ENDPOINT      = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].ydb_api_endpoint : ""
+      AYC_CACHE_YDB_DATABASE      = var.enable_response_cache ? yandex_ydb_database_serverless.response_cache[0].database_path : ""
+      AYC_CACHE_YDB_ACCESS_KEY_ID = var.enable_response_cache ? yandex_iam_service_account_static_access_key.ydb[0].access_key : ""
+      AYC_CACHE_YDB_SECRET_KEY    = var.enable_response_cache ? yandex_iam_service_account_static_access_key.ydb[0].secret_key : ""
       REVALIDATE_SECRET_ID  = module.security.revalidate_secret_id
       CACHE_PURGE_SECRET_ID = module.security.revalidate_secret_id
     }
