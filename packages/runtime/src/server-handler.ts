@@ -1,4 +1,5 @@
 import { IncomingMessage, ServerResponse } from 'http';
+import { PassThrough } from 'stream';
 import path from 'path';
 import fs from 'fs';
 
@@ -318,36 +319,9 @@ function handleViaNode(
         ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
         : event.requestContext.http.sourceIp;
 
-    Object.defineProperty(req, 'socket', {
-      value: {
-        remoteAddress: ip,
-        readable: true,
-        destroyed: false,
-        destroy() {
-          this.destroyed = true;
-          return this;
-        },
-        on() {
-          return this;
-        },
-        once() {
-          return this;
-        },
-        off() {
-          return this;
-        },
-        emit() {
-          return false;
-        },
-        removeListener() {
-          return this;
-        },
-        addListener() {
-          return this;
-        },
-      },
-      writable: true,
-    });
+    const socket = new PassThrough();
+    (socket as any).remoteAddress = ip;
+    Object.defineProperty(req, 'socket', { value: socket, writable: true });
 
     const chunks: Buffer[] = [];
     const resHeaders: Record<string, string | string[]> = {};
