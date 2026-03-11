@@ -323,13 +323,28 @@ function handleViaNode(
         remoteAddress: ip,
         readable: true,
         destroyed: false,
-        destroy() { this.destroyed = true; return this; },
-        on() { return this; },
-        once() { return this; },
-        off() { return this; },
-        emit() { return false; },
-        removeListener() { return this; },
-        addListener() { return this; },
+        destroy() {
+          this.destroyed = true;
+          return this;
+        },
+        on() {
+          return this;
+        },
+        once() {
+          return this;
+        },
+        off() {
+          return this;
+        },
+        emit() {
+          return false;
+        },
+        removeListener() {
+          return this;
+        },
+        addListener() {
+          return this;
+        },
       },
       writable: true,
     });
